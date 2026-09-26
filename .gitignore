@@ -9,12 +9,20 @@ node_modules/
 received/
 received_*/
 received.log
-# 验证产物
-sprint*_verify/
-_verify_*.py
-sprint*_preflight.py
-# 日志
+received_v0.1.log.bak
+# 日志与临时
 *.log
+*.log.bak
+_pids.txt
+# 验证产物：只排产物，保留脚本和报告
+sprint*_verify/shots/
+sprint*_verify/panel/
+sprint*_verify/**/runtime/
+sprint*_verify/**/*.log
+sprint*_verify/**/*.png
+sprint*_verify/**/state*.json
 # 系统
 .DS_Store
 Thumbs.db
+# 错名遗留
+.gitignore.txt

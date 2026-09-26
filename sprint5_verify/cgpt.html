@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh" data-bridge-state-url="http://localhost:8790">
+<head>
+<meta charset="utf-8" />
+<title>ChatGPT (verification proxy)</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f7f7f8; color: #1f1f24;
+    padding: 24px 320px 24px 24px; /* 右侧留 280px 给浮层面板，验证「不遮挡主内容」 */
+  }
+  .topbar { font-weight: 700; font-size: 18px; margin-bottom: 16px; }
+  .msg { max-width: 720px; margin: 12px 0; padding: 12px 16px; border-radius: 12px; line-height: 1.6; }
+  .user { background: #e8f0fe; align-self: flex-end; }
+  .assistant { background: #ffffff; border: 1px solid #e5e5e5; }
+  .row { display: flex; flex-direction: column; }
+  .hint { color: #888; font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+  <div class="topbar">ChatGPT</div>
+  <div class="row">
+    <div class="msg user">假设测试字段是 1</div>
+    <div class="msg assistant">已记录假设「测试字段 = 1 (v1)」。</div>
+    <div class="msg user">假设测试字段改成 2</div>
+    <div class="msg assistant">已更新假设「测试字段」：v1=1 已失效，v2=2 生效。</div>
+    <div class="msg user">我的获客成本控制得怎么样？</div>
+    <div class="msg assistant">我会基于已记录的假设继续分析。</div>
+  </div>
+  <div class="hint">（本页是 Sprint 5 面板验证用的 ChatGPT 外观代理页；右侧浮层由 panel.js 注入渲染。）</div>
+</body>
+</html>

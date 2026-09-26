@@ -1,6 +1,0 @@
-[2026-09-26T01:52:14] receiver listening on http://127.0.0.1:8787  (pid=34828)
-[2026-09-26T01:58:00] receiver listening on http://127.0.0.1:8787  (pid=22228)
-[2026-09-26T01:58:43] INGEST source=localhost role=user len=58 :: 'BRIDGE-TEST-#1 hello from page at 2026-09-25T17:58:43.441Z'
-[2026-09-26T01:58:44] INGEST source=localhost role=assistant len=58 :: 'BRIDGE-TEST-#2 hello from page at 2026-09-25T17:58:44.067Z'
-[2026-09-26T01:58:44] INGEST source=localhost role=user len=58 :: 'BRIDGE-TEST-#3 hello from page at 2026-09-25T17:58:44.701Z'
-[2026-09-26T02:04:20] receiver listening on http://127.0.0.1:8787  (pid=10036)
