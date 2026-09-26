@@ -1,3 +1,0 @@
-::1 - - [26/Sep/2026 13:40:21] "GET /cgpt6.html HTTP/1.1" 200 -
-::1 - - [26/Sep/2026 13:40:21] code 404, message File not found
-::1 - - [26/Sep/2026 13:40:21] "GET /favicon.ico HTTP/1.1" 404 -

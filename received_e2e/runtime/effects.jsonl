@@ -1,5 +1,0 @@
-{"id": 1, "source_event_id": "evt_4bd4695842b5", "version": [28, 29], "events_added": ["evt_4bd4695842b5"], "working_state.recent_changes": ["NEW_TOPIC:rejected@turn=2"]}
-{"id": 2, "source_event_id": "evt_c07ec47c3225", "version": [29, 30], "events_added": ["evt_c07ec47c3225"], "working_state.recent_changes": ["ASSUMPTION_CHANGED:accepted@turn=3"]}
-{"id": 3, "source_event_id": "evt_8d7a7dac9364", "version": [30, 31], "events_added": ["evt_8d7a7dac9364"], "working_state.recent_changes": ["USER_REFERENCES_PAST:accepted@turn=3"]}
-{"id": 4, "source_event_id": "evt_0e4ce335a5dd", "version": [31, 32], "events_added": ["evt_0e4ce335a5dd"], "working_state.recent_changes": ["NEW_TOPIC:rejected@turn=4"]}
-{"id": 5, "source_event_id": "evt_b6b7b8659755", "version": [32, 33], "events_added": ["evt_b6b7b8659755"], "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=6"]}
