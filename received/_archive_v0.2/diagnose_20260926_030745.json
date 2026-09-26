@@ -1,0 +1,22 @@
+{
+  "url": "https://chatgpt.com/c/6ab6bc9c-741c-83ec-8822-390cf1b2aff4",
+  "hostname": "chatgpt.com",
+  "site_key": "chatgpt.com",
+  "site_selector_hit": true,
+  "layer": 1,
+  "selector_used": "[data-message-author-role]",
+  "message_count": 5,
+  "sample_roles": [
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant"
+  ],
+  "sample_texts": [
+    "你发的是“1”。😊\n\n如果你是在回答上一个问题、选择第 1 项，或者想表达某个数字，可以告诉我具体",
+    "东方"
+  ],
+  "dom_signature": "<div data-message-author-role=\"assistant\" data-message-id=\"96237458-0071-4b92-8a92-773d8a5cd936\" dir=\"auto\" data-message-model-slug=\"gpt-5-6-mini\" class=\"min-h-8 text-message relative flex w-full flex-col items-end gap-2 text-start break-words whitespace-normal outline-none keyboard-focused:focus-ri",
+  "timestamp": "2026-09-25T19:07:45.735Z"
+}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>browser-bridge selftest (v0.2)</title>
+<style>
+  body { font-family: system-ui, "Microsoft YaHei", sans-serif; margin: 24px; color: #222; }
+  h1 { font-size: 18px; }
+  .bar { margin: 12px 0; }
+  button { padding: 6px 12px; margin-right: 8px; }
+  code { background: #f2f2f2; padding: 1px 4px; }
+  #thread { border: 1px solid #ccc; padding: 12px; max-width: 720px; }
+  #thread > div { border: 1px dashed #aaa; padding: 8px; margin: 8px 0; }
+  #status { background: #eef; padding: 8px; max-width: 720px; }
+  .hint { color: #666; font-size: 13px; }
+</style>
+<script>
+  // 本页是我自己造的测试 DOM，用于验证扩展的「三层选择器 + 自诊断」链路，
+  // 不代表 ChatGPT / Claude 的真实结构。
+  // ?scene=chatgpt  -> 场景 A：带 data-message-author-role，验证第一层（站点专用）
+  // ?scene=generic  -> 场景 B：只有普通 div，验证第二层（通用启发式）
+  (function () {
+    var scene = (new URLSearchParams(location.search).get('scene') || 'chatgpt').toLowerCase();
+    if (scene === 'chatgpt') {
+      // 让 content.js 认为「这个页面模拟的是 chatgpt.com」，从而走第一层逻辑
+      document.documentElement.setAttribute('data-bridge-site', 'chatgpt.com');
+    }
+    window.__scene = scene;
+  })();
+</script>
+</head>
+<body>
+<h1>browser-bridge 自建测试页 <span class="hint">v0.2</span></h1>
+<p class="hint">
+  当前场景：<code id="scene-name">?</code> 。
+  切换：<a href="?scene=chatgpt">场景 A（模拟 ChatGPT，验证第一层）</a> |
+  <a href="?scene=generic">场景 B（普通 div，验证第二层兜底）</a>
+</p>
+
+<!-- 用 section 而非 div：这两块是页面装饰，不能污染第二层启发式的候选集 -->
+<section id="status">
+  扩展注入状态：<code id="ready">-</code> ｜ 命中层：<code id="layer">-</code>
+  <span class="hint">（由 content.js 写入 &lt;html&gt; 的 data-bridge-ready / data-bridge-layer）</span>
+</section>
+
+<section class="bar">
+  <button id="add-user">追加一条 user 消息</button>
+  <button id="add-assistant">追加一条 assistant 消息</button>
+  <button id="clear">清空</button>
+</section>
+
+<section class="bar">
+  <input id="custom-text" size="46" placeholder="自定义 user 消息文本" value="预算是200万，我们按这个假设继续测算。">
+  <button id="add-custom">追加自定义消息</button>
+  <button id="add-dup">追加一条复用 msg-1 的消息</button>
+  <span class="hint">（v0.3：验证 data-message-id 去重）</span>
+</section>
+
+<!-- 侧栏：故意放一段 >20 字的文本，用来验证第二层启发式的 nav/aside 过滤是否生效 -->
+<aside class="sidebar" style="max-width:300px;border:1px solid #eee;padding:8px">
+  这是侧边栏里的干扰文本，长度也超过二十个字符，第二层启发式应当把它排除掉，不应该算作一条消息。
+</aside>
+
+<main id="thread"></main>
+
+<script>
+  var scene = window.__scene || 'chatgpt';
+  document.getElementById('scene-name').textContent = scene;
+
+  var n = 0;
+  var thread = document.getElementById('thread');
+
+  // v0.3：addMessage 支持自定义文本 / 自定义 id，用于验证「稳定 message_id 去重」
+  function addMessage(role, opts) {
+    opts = opts || {};
+    n++;
+    var wrap = document.createElement('div');
+    var stamp = new Date().toISOString();
+    var mid = opts.id || ('msg-' + n);
+    var text = opts.text || (scene === 'chatgpt'
+      ? 'BRIDGE-TEST-A#' + n + ' role=' + role +
+        ' 这是一条用于验证第一层站点专用选择器的测试消息 ' + stamp
+      : 'BRIDGE-TEST-B#' + n + ' role=' + role +
+        ' 这是一条只有普通 div 承载的测试消息，用来验证第二层通用启发式能否捞到它 ' + stamp);
+    if (scene === 'chatgpt') {
+      // 场景 A：模拟带稳定 id 的站点（data-message-id 存在 -> attr 路径）
+      wrap.setAttribute('data-message-author-role', role);
+      wrap.setAttribute('data-message-id', mid);
+      wrap.innerHTML = '<div class="markdown">' + text + '</div>';
+    } else {
+      // 场景 B：只有普通 div，没有任何可识别属性（也不给 data-message-id
+      // -> 扩展应退化为 fallback:hash(role+text)，并在 diagnose 里如实上报）
+      wrap.className = 'plain-line';
+      wrap.textContent = text;
+    }
+    thread.appendChild(wrap);
+    return mid;
+  }
+
+  document.getElementById('add-user').addEventListener('click', function () { addMessage('user'); });
+  document.getElementById('add-assistant').addEventListener('click', function () { addMessage('assistant'); });
+  document.getElementById('clear').addEventListener('click', function () { thread.innerHTML = ''; n = 0; });
+
+  // 自定义文本：用来造「会触发真实事件判定」的消息（例如假设值变化）
+  document.getElementById('add-custom').addEventListener('click', function () {
+    var t = document.getElementById('custom-text').value || '';
+    addMessage('user', { text: t });
+  });
+
+  // 重复 id：新 DOM 节点复用 msg-1 的 data-message-id，验证被去重（不应产生第 4 条）
+  document.getElementById('add-dup').addEventListener('click', function () {
+    addMessage('user', { id: 'msg-1', text: 'DUPLICATE-ID 这条复用 msg-1 的 id ' + new Date().toISOString() });
+  });
+
+  // 初始两条，让扩展一进页面就有东西可抓；?seed=0 可从空会话开始（v0.3 计数用）
+  var seed = parseInt((new URLSearchParams(location.search).get('seed') || '2'), 10);
+  if (isNaN(seed)) seed = 2;
+  for (var i = 0; i < seed; i++) addMessage(i % 2 === 0 ? 'user' : 'assistant');
+
+  // 只在值真的变化时写 DOM，避免持续改动触发扩展的 MutationObserver
+  var lastReady = '', lastLayer = '';
+  setInterval(function () {
+    var r = document.documentElement.getAttribute('data-bridge-ready') || 'not-injected';
+    var l = document.documentElement.getAttribute('data-bridge-layer') || '-';
+    if (r !== lastReady) { lastReady = r; document.getElementById('ready').textContent = r; }
+    if (l !== lastLayer) { lastLayer = l; document.getElementById('layer').textContent = l; }
+  }, 500);
+</script>
+</body>
+</html>

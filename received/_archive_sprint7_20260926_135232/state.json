@@ -1,0 +1,1107 @@
+{
+  "conversation_id": "browser-bridge",
+  "version": 40,
+  "current_topic": null,
+  "current_branch": null,
+  "nodes": [
+    {
+      "id": "assumption:用户量",
+      "type": "assumption",
+      "title": "用户量",
+      "status": "active",
+      "health": "ok",
+      "source_turns": [
+        1,
+        4,
+        9,
+        15,
+        16
+      ],
+      "versions": [
+        {
+          "version": 1,
+          "value": "100 万",
+          "source_turn": 1,
+          "created_at": "2026-09-26T05:16:47.470883+00:00",
+          "status": "superseded",
+          "supersedes": null
+        },
+        {
+          "version": 2,
+          "value": "80 万",
+          "source_turn": 4,
+          "created_at": "2026-09-26T05:16:58.794281+00:00",
+          "status": "superseded",
+          "supersedes": 1
+        },
+        {
+          "version": 3,
+          "value": "120 万",
+          "source_turn": 9,
+          "created_at": "2026-09-26T05:17:17.828673+00:00",
+          "status": "superseded",
+          "supersedes": 2
+        },
+        {
+          "version": 4,
+          "value": "200 万",
+          "source_turn": 15,
+          "created_at": "2026-09-26T05:17:38.954111+00:00",
+          "status": "superseded",
+          "supersedes": 3
+        },
+        {
+          "version": 5,
+          "value": "100 万",
+          "source_turn": 16,
+          "created_at": "2026-09-26T05:17:42.398868+00:00",
+          "status": "active",
+          "supersedes": 4
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "id": "assumption:获客成本",
+      "type": "assumption",
+      "title": "获客成本",
+      "status": "active",
+      "health": "ok",
+      "source_turns": [
+        2,
+        5
+      ],
+      "versions": [
+        {
+          "version": 1,
+          "value": "50 ",
+          "source_turn": 2,
+          "created_at": "2026-09-26T05:16:51.020004+00:00",
+          "status": "superseded",
+          "supersedes": null
+        },
+        {
+          "version": 2,
+          "value": "60 ",
+          "source_turn": 5,
+          "created_at": "2026-09-26T05:17:02.118217+00:00",
+          "status": "active",
+          "supersedes": 1
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "id": "conclusion:第一年收入",
+      "type": "conclusion",
+      "title": "第一年收入",
+      "status": "active",
+      "health": "stale",
+      "source_turns": [
+        3
+      ],
+      "versions": [
+        {
+          "version": 1,
+          "value": "5000 万",
+          "source_turn": 3,
+          "created_at": "2026-09-26T05:16:55.057634+00:00",
+          "status": "active",
+          "supersedes": null
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "id": "assumption:客单价",
+      "type": "assumption",
+      "title": "客单价",
+      "status": "active",
+      "health": "ok",
+      "source_turns": [
+        8
+      ],
+      "versions": [
+        {
+          "version": 1,
+          "value": "100 ",
+          "source_turn": 8,
+          "created_at": "2026-09-26T05:17:13.534348+00:00",
+          "status": "active",
+          "supersedes": null
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "id": "assumption:留存率",
+      "type": "assumption",
+      "title": "留存率",
+      "status": "active",
+      "health": "ok",
+      "source_turns": [
+        12,
+        13
+      ],
+      "versions": [
+        {
+          "version": 1,
+          "value": "40",
+          "source_turn": 12,
+          "created_at": "2026-09-26T05:17:28.682548+00:00",
+          "status": "superseded",
+          "supersedes": null
+        },
+        {
+          "version": 2,
+          "value": "60",
+          "source_turn": 13,
+          "created_at": "2026-09-26T05:17:32.593594+00:00",
+          "status": "active",
+          "supersedes": 1
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "id": "assumption:验证字段",
+      "type": "assumption",
+      "title": "验证字段",
+      "status": "active",
+      "health": "ok",
+      "source_turns": [
+        34
+      ],
+      "versions": [
+        {
+          "version": 1,
+          "value": "7",
+          "source_turn": 34,
+          "created_at": "2026-09-26T05:38:49.067246+00:00",
+          "status": "active",
+          "supersedes": null
+        }
+      ],
+      "metadata": {}
+    }
+  ],
+  "edges": [
+    {
+      "from": "conclusion:第一年收入",
+      "to": "assumption:用户量",
+      "type": "depends_on"
+    },
+    {
+      "from": "conclusion:第一年收入",
+      "to": "assumption:客单价",
+      "type": "depends_on"
+    },
+    {
+      "from": "conclusion:第一年收入",
+      "to": "assumption:留存率",
+      "type": "depends_on"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt_65281aa4725c",
+      "type": "ASSUMPTION_INTRODUCED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 中 span 为「假设用户量是 100 万」，明确使用设定词「假设」，且 entity 为「用户量」、new_value 为「100 万」，符合用户首次主动引入假设前提的定义；old_value 为 null 表示此前无同实体记录，且无推导标记，因此可确认为 ASSUMPTION_INTRODUCED。",
+      "evidence": {
+        "turns": [
+          1
+        ],
+        "span": "假设用户量是 100 万"
+      },
+      "entity": "用户量",
+      "old_value": null,
+      "new_value": "100 万",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_93082579c19d",
+      "type": "ASSUMPTION_INTRODUCED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "候选事件中用户使用「假设」一词主动设定了获客成本为50这一前提，符合ASSUMPTION_INTRODUCED的定义，且此前无同实体记录。",
+      "evidence": {
+        "turns": [
+          2
+        ],
+        "span": "假设获客成本是 50 "
+      },
+      "entity": "获客成本",
+      "old_value": null,
+      "new_value": "50 ",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_f053967a26a3",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 标记为 NEW_TOPIC，span 为“假设获客成本是 50 元”，表明引入了一个此前未出现的独立议题（获客成本假设），符合 NEW_TOPIC 的定义。",
+      "evidence": {
+        "turns": [
+          2
+        ],
+        "span": "假设获客成本是 50 元"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_c8d31015e30e",
+      "type": "CONCLUSION_INTRODUCED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "候选消息以推导关联词「那么」开头，声明「第一年收入大概是 5000 万」，符合由先前假设推导得出结果值的结论特征，而非自主设定的新假设，因此可确认 CONCLUSION_INTRODUCED 事件。",
+      "evidence": {
+        "turns": [
+          3
+        ],
+        "span": "那么第一年收入大概是 5000 万"
+      },
+      "entity": "第一年收入",
+      "old_value": null,
+      "new_value": "5000 万",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_dbefd6f33f21",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.2,
+      "reason": "候选证据仅包含一句关于第一年收入的陈述，未提供任何上下文表明该陈述引入了一个此前不存在的独立议题，因此不足以确认 NEW_TOPIC 事件。",
+      "evidence": {
+        "turns": [
+          3
+        ],
+        "span": "那么第一年收入大概是 5000 万"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_26e3e0e3a4da",
+      "type": "ASSUMPTION_CHANGED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 明确表示假设的用户量从 100 万改为 80 万，符合 ASSUMPTION_CHANGED 的定义：已有假设的值发生变化。",
+      "evidence": {
+        "turns": [
+          4
+        ],
+        "span": "假设用户量改成 80 万"
+      },
+      "entity": "用户量",
+      "old_value": "100 万",
+      "new_value": "80 万",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_1e2d9470243f",
+      "type": "ASSUMPTION_CHANGED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 明确表示获客成本从旧值 50 变为新值 60，符合 ASSUMPTION_CHANGED 的定义（已有假设的值发生变化）。",
+      "evidence": {
+        "turns": [
+          5
+        ],
+        "span": "获客成本其实是 60 "
+      },
+      "entity": "获客成本",
+      "old_value": "50 ",
+      "new_value": "60 ",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_04b8eb739e9b",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.2,
+      "reason": "Candidate 的 span 为“刚才那个收入结论还成立吗”，这是对既有收入结论的追问或复核，而非检测到一个此前不存在的独立议题。因此不足以确认 NEW_TOPIC 事件。",
+      "evidence": {
+        "turns": [
+          6
+        ],
+        "span": "刚才那个收入结论还成立吗"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_bed662e0f8e6",
+      "type": "USER_REFERENCES_PAST",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 的 span 为“刚才那个收入结论还成立吗”，明确引用了过去的讨论或结论（“刚才那个收入结论”），符合 USER_REFERENCES_PAST 的定义。",
+      "evidence": {
+        "turns": [
+          6
+        ],
+        "span": "刚才那个收入结论还成立吗"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_64f224003cc5",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 的 span 为“我们之前假设的用户量现在是多少”，提出了一个关于用户量假设的独立问题，属于此前未出现的议题，符合 NEW_TOPIC 的定义。",
+      "evidence": {
+        "turns": [
+          7
+        ],
+        "span": "我们之前假设的用户量现在是多少"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_c3794ee6af18",
+      "type": "USER_REFERENCES_PAST",
+      "confirmed": true,
+      "confidence": 0.97,
+      "reason": "Candidate 的 span 明确包含“我们之前假设的”，直接引用过去的假设，符合 USER_REFERENCES_PAST 事件定义。",
+      "evidence": {
+        "turns": [
+          7
+        ],
+        "span": "我们之前假设的用户量现在是多少"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_04c98229c04b",
+      "type": "ASSUMPTION_INTRODUCED",
+      "confirmed": true,
+      "confidence": 0.97,
+      "reason": "Candidate 中 span 为「假设客单价是 100」，明确使用设定词「假设」，且 entity 为「客单价」、new_value 为「100」，old_value 为 null，符合用户首次主动引入假设前提的定义，且无推导标记，因此可确认 ASSUMPTION_INTRODUCED 事件。",
+      "evidence": {
+        "turns": [
+          8
+        ],
+        "span": "假设客单价是 100 "
+      },
+      "entity": "客单价",
+      "old_value": null,
+      "new_value": "100 ",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_4177ed3fc049",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.2,
+      "reason": "Candidate 仅包含一个假设性表述片段“假设客单价是 100 元”，未提供任何上下文或证据表明这是一个此前不存在的独立议题，因此不足以确认 NEW_TOPIC 事件。",
+      "evidence": {
+        "turns": [
+          8
+        ],
+        "span": "假设客单价是 100 元"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_824ed7c8cb0e",
+      "type": "ASSUMPTION_CHANGED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 明确表明假设“用户量”的值从 80 万变为 120 万，符合 ASSUMPTION_CHANGED 的定义：已有假设的值发生变化。",
+      "evidence": {
+        "turns": [
+          9
+        ],
+        "span": "假设用户量再改成 120 万"
+      },
+      "entity": "用户量",
+      "old_value": "80 万",
+      "new_value": "120 万",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_5d89255017da",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.2,
+      "reason": "Candidate 仅包含一句关于“用户量这个假设改了好几次了”的陈述，未提供此前不存在独立议题的明确证据，也未说明该议题的具体内容或与既有议题的区分，因此不足以确认 NEW_TOPIC 事件。",
+      "evidence": {
+        "turns": [
+          10
+        ],
+        "span": "用户量这个假设改了好几次了"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_8e7d5eba352b",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 的 span 为“获客成本我们最早的假设是多少”，这是一个关于获客成本假设的独立议题，且 evidence_turns 指向第11轮，表明该议题在此前未被讨论过，符合 NEW_TOPIC 的定义。",
+      "evidence": {
+        "turns": [
+          11
+        ],
+        "span": "获客成本我们最早的假设是多少"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_96553d1a3bb0",
+      "type": "USER_REFERENCES_PAST",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 的 span 为“获客成本我们最早的假设是多少”，明确指向过去提出的假设，符合 USER_REFERENCES_PAST 的定义。",
+      "evidence": {
+        "turns": [
+          11
+        ],
+        "span": "获客成本我们最早的假设是多少"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_6293521e6fcc",
+      "type": "ASSUMPTION_INTRODUCED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "候选事件中用户使用「假设」一词主动设定了留存率为 40 的前提，符合 ASSUMPTION_INTRODUCED 的定义，且无同实体先前记录，属于首次引入假设。",
+      "evidence": {
+        "turns": [
+          12
+        ],
+        "span": "假设留存率是 40"
+      },
+      "entity": "留存率",
+      "old_value": null,
+      "new_value": "40",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_7e6ed453e7bf",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.2,
+      "reason": "Candidate 仅包含一个片段“假设留存率是 40%”，没有提供上下文说明该内容是否构成一个此前不存在的独立议题，因此不足以确认 NEW_TOPIC 事件。",
+      "evidence": {
+        "turns": [
+          12
+        ],
+        "span": "假设留存率是 40%"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_bcb0647ca4e5",
+      "type": "ASSUMPTION_CHANGED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 明确表示留存率这一假设的值从 40 变为 60，符合 ASSUMPTION_CHANGED 的定义：已有假设的值发生变化。",
+      "evidence": {
+        "turns": [
+          13
+        ],
+        "span": "如果留存率是 60"
+      },
+      "entity": "留存率",
+      "old_value": "40",
+      "new_value": "60",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_9122421e2f93",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 类型为 NEW_TOPIC，span 为“留存率和用户量有关系吗”，这是一个此前未出现的独立议题提问，符合检测到新独立议题的事件定义。",
+      "evidence": {
+        "turns": [
+          14
+        ],
+        "span": "留存率和用户量有关系吗"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_5801700aee60",
+      "type": "ASSUMPTION_CHANGED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 明确给出同一实体“用户量”的旧值“120 万”和新值“200 万”，且 span 中体现“假设用户量是 200 万”，符合 ASSUMPTION_CHANGED 定义中已有假设的值发生变化。",
+      "evidence": {
+        "turns": [
+          15
+        ],
+        "span": "假设用户量是 200 万"
+      },
+      "entity": "用户量",
+      "old_value": "120 万",
+      "new_value": "200 万",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_08725f75c26d",
+      "type": "ASSUMPTION_CHANGED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "Candidate 明确给出同一实体“用户量”的旧值“200 万”和新值“100 万”，且 span 中“用户量应该回到 100 万”表明该假设值发生变化，符合 ASSUMPTION_CHANGED 的定义。",
+      "evidence": {
+        "turns": [
+          16
+        ],
+        "span": "用户量应该回到 100 万"
+      },
+      "entity": "用户量",
+      "old_value": "200 万",
+      "new_value": "100 万",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_2fca5e389d9a",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 标记为 NEW_TOPIC，span 为“我们一共改过几次用户量”，这是一个此前未出现的独立议题，符合事件定义。",
+      "evidence": {
+        "turns": [
+          17
+        ],
+        "span": "我们一共改过几次用户量"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_0a135873b52e",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 标记为 NEW_TOPIC，span 为“现在的用户量假设是什么”，这是一个此前未出现的独立议题（询问用户量假设），符合检测到新独立议题的事件定义。",
+      "evidence": {
+        "turns": [
+          18
+        ],
+        "span": "现在的用户量假设是什么"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_1e68e15a50c1",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 的 span 为“获客成本当前是多少”，这是一个关于获客成本的独立询问，且 evidence_turns 仅包含第19轮，表明该议题在此前未被提及，符合 NEW_TOPIC 的定义。",
+      "evidence": {
+        "turns": [
+          19
+        ],
+        "span": "获客成本当前是多少"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_0d6261237d27",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.2,
+      "reason": "候选证据仅为一句“把假设都列出来看看”，未提供任何关于此前不存在的独立议题的具体内容或上下文，无法据此确认检测到新的独立议题。",
+      "evidence": {
+        "turns": [
+          20
+        ],
+        "span": "把假设都列出来看看"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_4126a54adbd9",
+      "type": "DEPENDENCY_DECLARED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "structural regex-detected; no LLM call",
+      "evidence": {
+        "turns": [
+          21
+        ],
+        "span": "第一年收入 = 用户量 × 客单价"
+      },
+      "entity": "第一年收入",
+      "old_value": null,
+      "new_value": "[\"用户量\", \"客单价\"]",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_08725f75c26d:stale",
+      "type": "CONCLUSION_STALE",
+      "confirmed": true,
+      "confidence": 0.95,
+      "evidence": {
+        "turns": [
+          16
+        ],
+        "span": "用户量应该回到 100 万"
+      },
+      "affected_nodes": [
+        "conclusion:第一年收入"
+      ],
+      "source_event_id": "evt_08725f75c26d",
+      "target_node": null,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_4c1673d4d90d",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 标记为 NEW_TOPIC，span 为“第一年收入 = 用户量 × 客单价”，这是一个此前未出现的独立议题（收入计算模型），符合 NEW_TOPIC 的定义。",
+      "evidence": {
+        "turns": [
+          21
+        ],
+        "span": "第一年收入 = 用户量 × 客单价"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_45aa4d896ced",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.05,
+      "reason": "Candidate 的 span 内容为界面导航与用户信息文本（如“ChatGPT”“新聊天”“图片”“资料库”“定时任务”“插件”“更多”“Kevin Chan”“免费版”），并未体现任何此前不存在的独立议题；entity、old_value、new_value 均为 null，缺少可确认新议题的实质证据。",
+      "evidence": {
+        "turns": [
+          22
+        ],
+        "span": "ChatGPT\n新聊天\n图片\n资料库\n定时任务\n插件\n更多\nKevin Chan\n免费版"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_8126540839f3",
+      "type": "DEPENDENCY_DECLARED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "structural regex-detected; no LLM call",
+      "evidence": {
+        "turns": [
+          28
+        ],
+        "span": "NEW_TOPIC:rejected@turn=22"
+      },
+      "entity": "turn",
+      "old_value": null,
+      "new_value": "[\"22\"]",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_2cc3854b5f65",
+      "type": "DEPENDENCY_DECLARED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "structural regex-detected; no LLM call",
+      "evidence": {
+        "turns": [
+          30
+        ],
+        "span": "CONCLUSION_STALE:derived@turn=21"
+      },
+      "entity": "turn",
+      "old_value": null,
+      "new_value": "[\"21\"]",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_d5c6e01d4b1c",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.95,
+      "reason": "Candidate 的 span 为 'NEW_TOPIC:rejected@turn=22'，表明该候选事件在 turn=22 已被拒绝，且 evidence_turns 仅包含 turn=28，未提供任何可确认存在此前不存在的独立议题的事实依据。因此不足以确认 NEW_TOPIC 事件。",
+      "evidence": {
+        "turns": [
+          28
+        ],
+        "span": "NEW_TOPIC:rejected@turn=22"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_1af9c26ad202",
+      "type": "NEW_TOPIC",
+      "confirmed": false,
+      "confidence": 0.2,
+      "reason": "Candidate 的 span 为 'CONCLUSION_STALE:derived@turn=21'，仅表明某个结论在 turn 21 派生后已过期，并未提供任何关于此前不存在的独立议题的信息。entity、old_value、new_value 均为 null，evidence_turns 仅包含 turn 30，无法据此确认检测到 NEW_TOPIC 事件。",
+      "evidence": {
+        "turns": [
+          30
+        ],
+        "span": "CONCLUSION_STALE:derived@turn=21"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_8ebf58b3f8d3",
+      "type": "ASSUMPTION_INTRODUCED",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "候选事件中用户以「验证字段是 7」的形式首次引入了一个具体设定（实体「验证字段」此前无记录，old_value 为 null），属于用户自主设定的前提，符合 ASSUMPTION_INTRODUCED 的定义。",
+      "evidence": {
+        "turns": [
+          34
+        ],
+        "span": "验证字段是 7"
+      },
+      "entity": "验证字段",
+      "old_value": null,
+      "new_value": "7",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_3ed74d24f515",
+      "type": "NEW_TOPIC",
+      "confirmed": true,
+      "confidence": 0.85,
+      "reason": "Candidate 的 span 为“假设 sprint6 验证字段是 7”，这是一个此前未出现的独立议题，符合 NEW_TOPIC 的定义。",
+      "evidence": {
+        "turns": [
+          34
+        ],
+        "span": "假设 sprint6 验证字段是 7"
+      },
+      "entity": null,
+      "old_value": null,
+      "new_value": null,
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_e0cd7a5750bf",
+      "type": "DEPENDENCY_DECLARED",
+      "confirmed": true,
+      "confidence": 0.95,
+      "reason": "structural regex-detected; no LLM call",
+      "evidence": {
+        "turns": [
+          37
+        ],
+        "span": "第一年收入 = 用户量 × 留存率"
+      },
+      "entity": "第一年收入",
+      "old_value": null,
+      "new_value": "[\"用户量\", \"留存率\"]",
+      "affected_nodes": [],
+      "requires_confirmation": false,
+      "source_role": "user"
+    },
+    {
+      "event_id": "evt_bcb0647ca4e5:stale",
+      "type": "CONCLUSION_STALE",
+      "confirmed": true,
+      "confidence": 0.95,
+      "evidence": {
+        "turns": [
+          13
+        ],
+        "span": "如果留存率是 60"
+      },
+      "affected_nodes": [
+        "conclusion:第一年收入"
+      ],
+      "source_event_id": "evt_bcb0647ca4e5",
+      "target_node": null,
+      "source_role": "user"
+    }
+  ],
+  "working_state": {
+    "current_question": null,
+    "active_assumptions": [
+      "assumption:用户量",
+      "assumption:获客成本",
+      "assumption:客单价",
+      "assumption:留存率",
+      "assumption:验证字段"
+    ],
+    "active_conclusions": [
+      "conclusion:第一年收入"
+    ],
+    "open_questions": [],
+    "recent_changes": [
+      "ASSUMPTION_INTRODUCED@turn=1",
+      "ASSUMPTION_INTRODUCED:accepted@turn=1",
+      "ASSUMPTION_INTRODUCED@turn=2",
+      "ASSUMPTION_INTRODUCED:accepted@turn=2",
+      "NEW_TOPIC@turn=2",
+      "NEW_TOPIC:accepted@turn=2",
+      "CONCLUSION_INTRODUCED@turn=3",
+      "CONCLUSION_INTRODUCED:accepted@turn=3",
+      "NEW_TOPIC@turn=3",
+      "NEW_TOPIC:rejected@turn=3",
+      "ASSUMPTION_CHANGED@turn=4",
+      "ASSUMPTION_CHANGED:accepted@turn=4",
+      "ASSUMPTION_CHANGED@turn=5",
+      "ASSUMPTION_CHANGED:accepted@turn=5",
+      "NEW_TOPIC@turn=6",
+      "NEW_TOPIC:rejected@turn=6",
+      "USER_REFERENCES_PAST@turn=6",
+      "USER_REFERENCES_PAST:accepted@turn=6",
+      "NEW_TOPIC@turn=7",
+      "NEW_TOPIC:accepted@turn=7",
+      "USER_REFERENCES_PAST@turn=7",
+      "USER_REFERENCES_PAST:accepted@turn=7",
+      "ASSUMPTION_INTRODUCED@turn=8",
+      "ASSUMPTION_INTRODUCED:accepted@turn=8",
+      "NEW_TOPIC@turn=8",
+      "NEW_TOPIC:rejected@turn=8",
+      "ASSUMPTION_CHANGED@turn=9",
+      "ASSUMPTION_CHANGED:accepted@turn=9",
+      "NEW_TOPIC@turn=10",
+      "NEW_TOPIC:rejected@turn=10",
+      "NEW_TOPIC@turn=11",
+      "NEW_TOPIC:accepted@turn=11",
+      "USER_REFERENCES_PAST@turn=11",
+      "USER_REFERENCES_PAST:accepted@turn=11",
+      "ASSUMPTION_INTRODUCED@turn=12",
+      "ASSUMPTION_INTRODUCED:accepted@turn=12",
+      "NEW_TOPIC@turn=12",
+      "NEW_TOPIC:rejected@turn=12",
+      "ASSUMPTION_CHANGED@turn=13",
+      "ASSUMPTION_CHANGED:accepted@turn=13",
+      "NEW_TOPIC@turn=14",
+      "NEW_TOPIC:accepted@turn=14",
+      "ASSUMPTION_CHANGED@turn=15",
+      "ASSUMPTION_CHANGED:accepted@turn=15",
+      "ASSUMPTION_CHANGED@turn=16",
+      "ASSUMPTION_CHANGED:accepted@turn=16",
+      "NEW_TOPIC@turn=17",
+      "NEW_TOPIC:accepted@turn=17",
+      "NEW_TOPIC@turn=18",
+      "NEW_TOPIC:accepted@turn=18",
+      "NEW_TOPIC@turn=19",
+      "NEW_TOPIC:accepted@turn=19",
+      "NEW_TOPIC@turn=20",
+      "NEW_TOPIC:rejected@turn=20",
+      "DEPENDENCY_DECLARED@turn=21",
+      "DEPENDENCY_DECLARED:accepted@turn=21",
+      "CONCLUSION_STALE@turn=16",
+      "CONCLUSION_STALE:derived@turn=21",
+      "NEW_TOPIC@turn=21",
+      "NEW_TOPIC:accepted@turn=21",
+      "NEW_TOPIC@turn=22",
+      "NEW_TOPIC:rejected@turn=22",
+      "DEPENDENCY_DECLARED@turn=28",
+      "DEPENDENCY_DECLARED:accepted@turn=28",
+      "DEPENDENCY_DECLARED@turn=30",
+      "DEPENDENCY_DECLARED:accepted@turn=30",
+      "NEW_TOPIC@turn=28",
+      "NEW_TOPIC:rejected@turn=28",
+      "NEW_TOPIC@turn=30",
+      "NEW_TOPIC:rejected@turn=30",
+      "ASSUMPTION_INTRODUCED@turn=34",
+      "ASSUMPTION_INTRODUCED:accepted@turn=34",
+      "NEW_TOPIC@turn=34",
+      "NEW_TOPIC:accepted@turn=34",
+      "DEPENDENCY_DECLARED@turn=37",
+      "DEPENDENCY_DECLARED:accepted@turn=37",
+      "CONCLUSION_STALE@turn=13",
+      "CONCLUSION_STALE:derived@turn=37"
+    ],
+    "relevant_turns": [
+      1,
+      1,
+      2,
+      2,
+      2,
+      3,
+      3,
+      3,
+      4,
+      4,
+      5,
+      5,
+      6,
+      6,
+      6,
+      7,
+      7,
+      7,
+      8,
+      8,
+      8,
+      9,
+      9,
+      10,
+      10,
+      11,
+      11,
+      11,
+      12,
+      12,
+      12,
+      13,
+      13,
+      14,
+      14,
+      15,
+      15,
+      16,
+      16,
+      17,
+      17,
+      18,
+      18,
+      19,
+      19,
+      20,
+      20,
+      21,
+      21,
+      21,
+      21,
+      22,
+      22,
+      28,
+      28,
+      30,
+      30,
+      28,
+      30,
+      34,
+      34,
+      34,
+      37,
+      37,
+      37
+    ]
+  }
+}

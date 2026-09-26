@@ -1,0 +1,22 @@
+{
+  "url": "https://chatgpt.com/g/g-p-6ab6440daa048191b85cdb8c5d504cea-wang-ye-duan-llmjie-jue-tong-dian-fang-an/c/6ab6bc9c-741c-83ec-8822-390cf1b2aff4",
+  "hostname": "chatgpt.com",
+  "site_key": "chatgpt.com",
+  "site_selector_hit": true,
+  "layer": 1,
+  "selector_used": "[data-message-author-role]",
+  "message_count": 5,
+  "sample_roles": [
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant"
+  ],
+  "sample_texts": [
+    "有，而且要看你的目标是什么。\n\n如果目标是：\n\n让多个 LLM 自动交流、互相质疑、融合观点，最终产",
+    "我要的是免费方案"
+  ],
+  "dom_signature": "<div data-message-author-role=\"assistant\" data-message-id=\"2200fdbb-cbf0-4284-8fc5-36f595c6bfcc\" dir=\"auto\" data-message-model-slug=\"gpt-5-6-mini\" class=\"min-h-8 text-message relative flex w-full flex-col items-end gap-2 text-start break-words whitespace-normal outline-none keyboard-focused:focus-ri",
+  "timestamp": "2026-09-25T19:55:02.644Z"
+}

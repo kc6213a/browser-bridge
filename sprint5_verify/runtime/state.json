@@ -1,0 +1,21 @@
+{
+  "nodes": [
+    {"id": "assumption:用户量", "type": "assumption", "title": "用户量", "versions": [{"version": 5, "value": "100万", "status": "active"}], "health": "ok"},
+    {"id": "assumption:获客成本", "type": "assumption", "title": "获客成本", "versions": [{"version": 2, "value": "60", "status": "active"}], "health": "ok"},
+    {"id": "assumption:客单价", "type": "assumption", "title": "客单价", "versions": [{"version": 1, "value": "100", "status": "active"}], "health": "ok"},
+    {"id": "assumption:留存率", "type": "assumption", "title": "留存率", "versions": [{"version": 2, "value": "60", "status": "active"}], "health": "ok"},
+    {"id": "assumption:测试字段", "type": "assumption", "title": "测试字段", "versions": [{"version": 1, "value": "1", "status": "superseded"}, {"version": 2, "value": "2", "status": "active"}], "health": "ok"},
+    {"id": "conclusion:第一年收入", "type": "conclusion", "title": "第一年收入", "health": "stale"}
+  ],
+  "edges": [
+    {"type": "depends_on", "from": "conclusion:第一年收入", "to": "assumption:用户量"},
+    {"type": "depends_on", "from": "conclusion:第一年收入", "to": "assumption:客单价"}
+  ],
+  "working_state": {
+    "recent_changes": [
+      "USER_REFERENCES_PAST @turn 11",
+      "ASSUMPTION_CHANGED 用户量 200万→100万 @turn 16",
+      "ASSUMPTION_CHANGED 测试字段 1→2 @turn 17"
+    ]
+  }
+}

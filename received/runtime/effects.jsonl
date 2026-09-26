@@ -1,0 +1,34 @@
+{"id": 1, "source_event_id": "evt_ee483a763644"}
+{"id": 2, "source_event_id": "evt_454d005bf745"}
+{"id": 3, "source_event_id": "evt_3fcecc4e5fb2"}
+{"id": 4, "source_event_id": "evt_c4c6ec04801b"}
+{"id": 5, "source_event_id": "evt_7101e0a44402", "version": [1, 2], "events_added": ["evt_7101e0a44402"], "nodes_added": ["topic:862f2e65"], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "judge_result": "accepted", "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=4"]}
+{"id": 6, "source_event_id": "evt_3b7d7008a0b8"}
+{"id": 7, "source_event_id": "evt_de357011e23c"}
+{"id": 8, "source_event_id": "evt_74d955405aaa"}
+{"id": 9, "source_event_id": "evt_49af9074ed3c"}
+{"id": 10, "source_event_id": "evt_03c7c8efdb82"}
+{"id": 11, "source_event_id": "evt_4531f509bc3e"}
+{"id": 12, "source_event_id": "evt_0fcd0f45e455", "version": [2, 3], "events_added": ["evt_0fcd0f45e455"], "nodes_added": ["topic:49a21c8f"], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "judge_result": "accepted", "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=7"]}
+{"id": 13, "source_event_id": "evt_f7f01e200877"}
+{"id": 14, "source_event_id": "evt_4c57a0e2377d", "version": [3, 4], "events_added": ["evt_4c57a0e2377d"], "nodes_added": [], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "skipped": "event.confirmed is not True -> 不改 nodes", "judge_result": "rejected", "working_state.recent_changes": ["NEW_TOPIC:rejected@turn=9"]}
+{"id": 15, "source_event_id": "evt_6b7c69a69f22"}
+{"id": 16, "source_event_id": "evt_21a4c7498d96", "version": [4, 5], "events_added": ["evt_21a4c7498d96"], "nodes_added": [], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "edges_added": [], "skipped": "LHS node not found: 讨论监督者", "judge_result": "accepted", "working_state.recent_changes": ["DEPENDENCY_DECLARED:accepted@turn=11"]}
+{"id": 17, "source_event_id": "evt_8f20e7874d46", "version": [5, 6], "events_added": ["evt_8f20e7874d46"], "nodes_added": ["topic:61dd8204"], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "judge_result": "accepted", "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=11"]}
+{"id": 18, "source_event_id": "evt_30f9eab854d3", "version": [6, 7], "events_added": ["evt_30f9eab854d3"], "nodes_added": [], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "edges_added": [], "skipped": "LHS node not found: 对", "judge_result": "accepted", "working_state.recent_changes": ["DEPENDENCY_DECLARED:accepted@turn=12"]}
+{"id": 19, "source_event_id": "evt_9c3d1d0f357c", "version": [7, 8], "events_added": ["evt_9c3d1d0f357c"], "nodes_added": ["topic:ccd76ad2"], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "judge_result": "accepted", "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=12"]}
+{"id": 20, "source_event_id": "evt_b6ca09565d08"}
+{"id": 21, "source_event_id": "evt_d4de4486c594"}
+{"id": 22, "source_event_id": "evt_acf5ca4070d0", "version": [8, 9], "events_added": ["evt_acf5ca4070d0"], "nodes_added": ["topic:73f413fb"], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "judge_result": "accepted", "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=14"]}
+{"id": 23, "source_event_id": "evt_3198381b6c8f"}
+{"id": 24, "source_event_id": "evt_fd6bcb1f5556", "version": [9, 10], "events_added": ["evt_fd6bcb1f5556"], "nodes_added": [], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "skipped": "event.confirmed is not True -> 不改 nodes", "judge_result": "rejected", "working_state.recent_changes": ["NEW_TOPIC:rejected@turn=16"]}
+{"id": 25, "source_event_id": "evt_bbe7ff7fb591"}
+{"id": 26, "source_event_id": "evt_64a8c40a15dd"}
+{"id": 27, "source_event_id": "evt_7c7efe5c928c", "version": [10, 11], "events_added": ["evt_7c7efe5c928c"], "nodes_added": ["topic:570c8a63"], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "judge_result": "accepted", "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=18"]}
+{"id": 28, "source_event_id": "evt_92ca4b931e68"}
+{"id": 29, "source_event_id": "evt_499c2c872230", "version": [11, 12], "events_added": ["evt_499c2c872230"], "nodes_added": ["topic:fec71a53"], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "judge_result": "accepted", "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=20"]}
+{"id": 30, "source_event_id": "evt_de600f49c146"}
+{"id": 31, "source_event_id": "evt_4eaf422fd042"}
+{"id": 32, "source_event_id": "evt_98d897fe83ed", "version": [12, 13], "events_added": ["evt_98d897fe83ed"], "nodes_added": ["topic:48b32b80"], "nodes_updated": [], "versions_added": [], "versions_superseded": [], "judge_result": "accepted", "working_state.recent_changes": ["NEW_TOPIC:accepted@turn=22"]}
+{"id": 33, "source_event_id": "evt_340ac00c6304"}
+{"id": 34, "source_event_id": "evt_aafef45110ff"}

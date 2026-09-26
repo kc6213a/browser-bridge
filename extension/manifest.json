@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Bridge",
+  "version": "0.2.1",
+  "description": "抓取网页 LLM 会话消息并自诊断 DOM 结构，转发到本地 agent 接收端 (localhost:8787)",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "http://localhost:8787/*",
+    "https://localhost:8787/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "http://localhost/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*"
+      ],
+      "js": ["panel.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

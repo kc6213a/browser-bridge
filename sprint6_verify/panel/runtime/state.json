@@ -1,0 +1,24 @@
+{
+  "nodes": [
+    {"id": "assumption:用户量", "type": "assumption", "title": "用户量",
+     "versions": [{"version": 5, "value": "100万", "status": "active"}], "health": "ok"},
+    {"id": "assumption:客单价", "type": "assumption", "title": "客单价",
+     "versions": [{"version": 1, "value": "100", "status": "active"}], "health": "ok"},
+    {"id": "conclusion:第一年收入", "type": "conclusion", "title": "第一年收入", "health": "stale"}
+  ],
+  "edges": [
+    {"from": "conclusion:第一年收入", "to": "assumption:用户量", "type": "depends_on"},
+    {"from": "conclusion:第一年收入", "to": "assumption:客单价", "type": "depends_on"}
+  ],
+  "working_state": {
+    "recent_changes": [
+      "NEW_TOPIC@turn=28",
+      "NEW_TOPIC:rejected@turn=28",
+      "ASSUMPTION_CHANGED:accepted@turn=27",
+      "DEPENDENCY_DECLARED:accepted@turn=21",
+      "CONCLUSION_STALE:derived@turn=21",
+      "NEW_TOPIC:rejected@turn=30",
+      "USER_REFERENCES_PAST @turn 11"
+    ]
+  }
+}

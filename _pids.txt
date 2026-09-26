@@ -1,0 +1,2 @@
+﻿20776 | python | C:\Users\Kevin Chan\AppData\Local\Programs\Python\Python313\python.exe
+38160 | python | C:\Users\Kevin Chan\.workbuddy\binaries\python\versions\3.13.12\python.exe

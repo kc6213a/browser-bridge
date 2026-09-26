@@ -1,0 +1,19 @@
+{
+  "url": "https://chatgpt.com/g/g-p-6ab6440daa048191b85cdb8c5d504cea-wang-ye-duan-llmjie-jue-tong-dian-fang-an/c/6ab6bc9c-741c-83ec-8822-390cf1b2aff4",
+  "hostname": "chatgpt.com",
+  "site_key": "chatgpt.com",
+  "site_selector_hit": false,
+  "layer": 2,
+  "selector_used": "generic:div,article",
+  "message_count": 2,
+  "sample_roles": [
+    "user",
+    "assistant"
+  ],
+  "sample_texts": [
+    "ChatGPT\n新聊天\n图片\n资料库\n定时任务\n插件\n项目\nCodex\n更多\n最近\n金融指标判定建议",
+    "(function ibe(e,t){e?.addEventListener(`input`,()="
+  ],
+  "dom_signature": "<div class=\"flex h-full w-(--sidebar-width) flex-col transition-opacity select-none motion-safe:duration-500\"><nav class=\"group/scrollport relative flex min-h-0 w-full flex-1 flex-col overflow-y-auto\" aria-label=\"历史聊天记录\" data-scrolled-from-end=\"\"><div class=\"sticky top-0 z-30 bg-(--sidebar-surface-p",
+  "timestamp": "2026-09-25T20:22:30.895Z"
+}

@@ -1,0 +1,17 @@
+{
+  "url": "https://chatgpt.com/c/6ab6bc9c-741c-83ec-8822-390cf1b2aff4",
+  "hostname": "chatgpt.com",
+  "site_key": "chatgpt.com",
+  "site_selector_hit": false,
+  "layer": 2,
+  "selector_used": "generic:div,article",
+  "message_count": 1,
+  "sample_roles": [
+    "user"
+  ],
+  "sample_texts": [
+    "ChatGPT\n新聊天\n图片\n资料库\n定时任务\n插件\n更多\nKevin Chan\n免费版"
+  ],
+  "dom_signature": "<div class=\"flex h-full w-(--sidebar-width) flex-col transition-opacity select-none motion-safe:duration-500\"><nav class=\"group/scrollport relative flex min-h-0 w-full flex-1 flex-col overflow-y-auto\" aria-label=\"历史聊天记录\"><div class=\"sticky top-0 z-30 bg-(--sidebar-surface-primary)\"><div class=\"touch",
+  "timestamp": "2026-09-25T19:02:50.322Z"
+}

@@ -1,0 +1,24 @@
+{
+  "url": "http://localhost:8788/test-page.html?scene=generic&seed=0",
+  "hostname": "localhost",
+  "site_key": "localhost",
+  "site_selector_hit": false,
+  "layer": 2,
+  "selector_used": "generic:div,article",
+  "message_count": 1,
+  "message_id_source": "fallback:hash(role+text)",
+  "message_id_sources": {
+    "fallback:hash(role+text)": 1
+  },
+  "sample_message_ids": [
+    "h:7330936c"
+  ],
+  "sample_roles": [
+    "user"
+  ],
+  "sample_texts": [
+    "BRIDGE-TEST-B#1 role=user 这是一条只有普通 div 承载的测试消息，用来验"
+  ],
+  "dom_signature": "<div class=\"plain-line\">BRIDGE-TEST-B#1 role=user 这是一条只有普通 div 承载的测试消息，用来验证第二层通用启发式能否捞到它 2026-09-25T20:01:51.805Z</div>",
+  "timestamp": "2026-09-25T20:01:52.611Z"
+}

@@ -1,0 +1,22 @@
+{
+  "url": "https://chatgpt.com/c/6ab6bc9c-741c-83ec-8822-390cf1b2aff4",
+  "hostname": "chatgpt.com",
+  "site_key": "chatgpt.com",
+  "site_selector_hit": true,
+  "layer": 1,
+  "selector_used": "[data-message-author-role]",
+  "message_count": 11,
+  "sample_roles": [
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant"
+  ],
+  "sample_texts": [
+    "“FSD”有几种常见含义，取决于你指的是什么：\n\nFull Self-Driving（完全自动驾驶）",
+    "macd"
+  ],
+  "dom_signature": "<div data-message-author-role=\"assistant\" data-message-id=\"41731339-d06e-4572-93ca-344c228c9e83\" dir=\"auto\" data-message-model-slug=\"gpt-5-6-mini\" class=\"min-h-8 text-message relative flex w-full flex-col items-end gap-2 text-start break-words whitespace-normal outline-none keyboard-focused:focus-ri",
+  "timestamp": "2026-09-25T19:03:16.263Z"
+}
