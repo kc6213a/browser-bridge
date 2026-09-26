@@ -35,7 +35,7 @@
   const hostOk = ALLOWED_HOSTS.some((h) => host === h || host.endsWith('.' + h));
   if (!TEST_MODE && !hostOk) return; // 真实站点且不在白名单 -> 不注入
 
-  const BASE = (OVERRIDE || 'http://localhost:8787').replace(/\/+$/, '');
+  const BASE = (OVERRIDE || 'http://127.0.0.1:8787').replace(/\/+$/, '');
   const STATE_URL = BASE + '/state';
   const POLL_MS = 5000;
 
@@ -74,51 +74,58 @@
 
   function buildPanel() {
     const c = palette();
-    const root = el('div', { cls: '__bb_panel__' });
-    Object.assign(root.style, {
+
+    // 外层 host：暴露在真实 DOM（document.body）仅用于定位，但内部用 Shadow DOM 物理隔离，
+    // 让 content.js 的 document.querySelectorAll('div, article') 抓不到面板内容（断回环），
+    // 同时隔离 ChatGPT 全局 CSS（样式全部内联进 shadow root）。
+    const host = el('div', { cls: '__bb_panel__' });
+    host.setAttribute('data-bridge-panel', '1'); // 防御性标记：即便 shadow 失效，content.js 也能据此排除
+    Object.assign(host.style, {
       position: 'fixed', top: '0', right: '0', width: '280px',
       maxHeight: '100vh', overflowY: 'auto', zIndex: '2147483600',
-      background: c.panelBg, color: c.text, borderLeft: '1px solid ' + c.border,
-      boxShadow: '-2px 0 8px rgba(0,0,0,0.12)', font: '12px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
       boxSizing: 'border-box',
     });
 
-    // 头部
+    const shadow = host.attachShadow({ mode: 'open' });
+
+    // 面板样式全部内联进 shadow root：ChatGPT 的 CSS 无法穿透 shadow 边界。
+    const style = document.createElement('style');
+    style.textContent = [
+      '* { box-sizing: border-box; font: 12px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }',
+      '.__bb_panel__ { background: ' + c.panelBg + '; color: ' + c.text +
+        '; border-left: 1px solid ' + c.border + '; box-shadow: -2px 0 8px rgba(0,0,0,0.12); }',
+      '.__bb_head__ { display: flex; align-items: center; justify-content: space-between;',
+      ' padding: 6px 8px; background: ' + c.headerBg + '; border-bottom: 1px solid ' + c.border +
+        '; position: sticky; top: 0; }',
+      '.__bb_body__ { padding: 8px; }',
+      'button { cursor: pointer; border: 1px solid ' + c.border + '; background: ' + c.panelBg +
+        '; color: ' + c.text + '; border-radius: 4px; width: 22px; height: 20px; line-height: 1; }',
+      'button.__bb_x__ { font-size: 14px; }',
+    ].join('\n');
+    shadow.appendChild(style);
+
+    // 内部根（位于 shadow 内）：承载 header + body
+    const root = el('div', { cls: '__bb_panel__' });
+
+    // 头部（样式来自 shadow <style>，不再用内联）
     const header = el('div', { cls: '__bb_head__' });
-    Object.assign(header.style, {
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '6px 8px', background: c.headerBg, borderBottom: '1px solid ' + c.border,
-      position: 'sticky', top: '0',
-    });
     const title = el('span', { text: '系统状态', style: { fontWeight: '600', color: c.text } });
     const btnRow = el('span', { style: { display: 'flex', gap: '4px' } });
-    const collapseBtn = el('button', {
-      text: '▾', // ▾
-      style: {
-        cursor: 'pointer', border: '1px solid ' + c.border, background: c.panelBg,
-        color: c.text, borderRadius: '4px', width: '22px', height: '20px', lineHeight: '1',
-      },
-    });
-    const closeBtn = el('button', {
-      text: '×', // ×
-      style: {
-        cursor: 'pointer', border: '1px solid ' + c.border, background: c.panelBg,
-        color: c.text, borderRadius: '4px', width: '22px', height: '20px', lineHeight: '1',
-        fontSize: '14px',
-      },
-    });
+    const collapseBtn = el('button', { text: '▾', cls: '__bb_icon__' }); // ▾
+    const closeBtn = el('button', { text: '×', cls: '__bb_x__' }); // ×
     btnRow.appendChild(collapseBtn);
     btnRow.appendChild(closeBtn);
     header.appendChild(title);
     header.appendChild(btnRow);
 
     // 身体
-    const body = el('div', { cls: '__bb_body__', style: { padding: '8px' } });
+    const body = el('div', { cls: '__bb_body__' });
 
     root.appendChild(header);
     root.appendChild(body);
+    shadow.appendChild(root);
 
-    // 交互：折叠（最小化到头部）/ 关闭（隐藏，刷新恢复）
+    // 交互：折叠（最小化到头部）/ 关闭（隐藏整个 host，刷新页面恢复）
     collapseBtn.addEventListener('click', () => {
       const collapsed = body.style.display === 'none';
       body.style.display = collapsed ? '' : 'none';
@@ -126,11 +133,11 @@
       root.style.maxHeight = collapsed ? '100vh' : 'auto';
     });
     closeBtn.addEventListener('click', () => {
-      root.style.display = 'none';
+      host.style.display = 'none';
     });
 
-    if (document.body) document.body.appendChild(root);
-    return { root, body };
+    if (document.body) document.body.appendChild(host);
+    return { root, body, host };
   }
 
   // ---------------------------------------------------------------
@@ -168,15 +175,52 @@
     }
   }
 
-  // Sprint 7：议题区块（topic 节点，v0.1 最简——无层级/关联/交互）
+  // Sprint 7：议题区块。
+  // Sprint 17（议题树 v0.1）：按 parent_id 缩进显示。
+  //   - parent_id 为 null / 指向不存在节点 / 指向自己 -> 顶层，缩进 0
+  //   - 有有效 parent_id -> 缩进一级
+  //   - v0.1 只支持一级（不递归孙节点）、无折叠、无交互、无关联边。
   function renderTopics(state, body, c) {
     body.appendChild(blockTitle('议题', c));
-    const topics = (state.nodes || []).filter((n) => n.type === 'topic');
-    if (!topics.length) { body.appendChild(row('尚无议题', c, { color: c.sub })); return; }
-    for (const t of topics) {
+    const all = (state.nodes || []).filter((n) => n.type === 'topic');
+    if (!all.length) { body.appendChild(row('尚无议题', c, { color: c.sub })); return; }
+
+    const byId = {};
+    for (const t of all) { if (t && t.id) byId[t.id] = t; }
+
+    // 与 state_updater 同一口径：父必须真实存在且不是自己，否则当顶层。
+    const parentOf = (t) => {
+      const pid = t && t.parent_id;
+      if (typeof pid !== 'string' || !pid) return null;
+      const p = byId[pid];
+      return (p && p.id !== t.id) ? pid : null;
+    };
+
+    // 父在前、子紧随其后；v0.1 仅展开一级。
+    const ordered = [];
+    for (const t of all) {
+      if (parentOf(t) !== null) continue;
+      ordered.push({ node: t, depth: 0 });
+      for (const ch of all) {
+        if (parentOf(ch) === t.id) ordered.push({ node: ch, depth: 1 });
+      }
+    }
+    // 防御：理论上不会出现（state_updater 已把无效父置 null），孤儿按顶层兜底显示。
+    for (const t of all) {
+      if (!ordered.some((o) => o.node === t)) ordered.push({ node: t, depth: 0 });
+    }
+
+    for (const item of ordered) {
+      const t = item.node;
       const turns = t.source_turns || [];
       const turn = turns.length ? turns[0] : '?';
-      body.appendChild(row(t.title + '  [turn ' + turn + ']', c));
+      const isChild = item.depth > 0;
+      body.appendChild(
+        row((isChild ? '└ ' : '') + (t.title || '') + '  [turn ' + turn + ']', c, {
+          paddingLeft: isChild ? '14px' : '0px',
+          color: isChild ? c.sub : c.text,
+        })
+      );
     }
   }
 
