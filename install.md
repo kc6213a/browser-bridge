@@ -3,7 +3,7 @@
 你不需要懂技术，不需要打开开发者工具（F12），不需要登录任何账号给我。
 照下面 7 步做，约 1 分钟。
 
-> 目录位置：`C:\Users\Kevin Chan\WorkBuddy\2026-09-26-01-50-43\browser-bridge`
+> 目录位置：`C:\Users\Kevin Chan\WorkBuddy\conversation-agent-bridge`
 
 ---
 
@@ -61,7 +61,7 @@ python server.py
 在弹出的文件夹选择框里，粘贴或浏览到这个目录并**选中它（不用进到里面）**：
 
 ```
-C:\Users\Kevin Chan\WorkBuddy\2026-09-26-01-50-43\browser-bridge\extension
+C:\Users\Kevin Chan\WorkBuddy\conversation-agent-bridge\extension
 ```
 
 点「选择文件夹」。

@@ -49,8 +49,8 @@ Cloudflare 403「正在进行安全验证」，MSG_CANDIDATES=0，content.js 未
   1. 打开 `edge://extensions`（Chrome 则是 `chrome://extensions`）
   2. 打开右下角「开发人员模式」
   3. 点「加载已解压的扩展程序」
-  4. 选目录：`C:\Users\Kevin Chan\WorkBuddy\2026-09-26-01-50-43\browser-bridge\extension`
-  5. 确认接收端在跑：`python browser-bridge/server.py`
+  4. 选目录：`C:\Users\Kevin Chan\WorkBuddy\conversation-agent-bridge\extension`
+  5. 确认接收端在跑：`python conversation-agent-bridge/server.py`
 - **做完后我怎么接**：你在网页发一条测试消息，我读 `received.log` 或
   `curl http://127.0.0.1:8787/recent` 验证原文是否进来。
 
