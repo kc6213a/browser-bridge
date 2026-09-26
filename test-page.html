@@ -63,6 +63,15 @@
 
 <main id="thread"></main>
 
+<!-- Sprint 15 self-test：模拟 bridge 面板内容（普通 div，带 data-bridge-panel 标记 + DEPENDENCY 噪声），
+     用于本地验证 content.js 的 L2 过滤是否排除面板内容（即使未走 Shadow DOM 的本地测试页）。
+     真实面板上线后该块仅用于本地 self-test，不影响真实抓取。 -->
+<div class="__bb_panel__" data-bridge-panel="1" style="max-width:300px;border:1px solid #c00;padding:8px;margin-top:12px;background:#fff">
+  <strong>模拟面板（self-test 不应被抓取）</strong>
+  <div>DEPENDENCY_DECLARED:accepted@turn=999 这是面板渲染的最近变化行</div>
+  <div>NEW_TOPIC:accepted@turn=998 另一条面板文本</div>
+</div>
+
 <script>
   var scene = window.__scene || 'chatgpt';
   document.getElementById('scene-name').textContent = scene;
