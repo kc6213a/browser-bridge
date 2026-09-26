@@ -1,8 +1,10 @@
 // background service worker (v0.2)：把 content.js 的消息转发到本地接收端。
 // 放在 background 而不是 content.js 直接 fetch 的原因：
-// ChatGPT / Claude 是 https 页面，content script 里 fetch("http://localhost:8787")
+// ChatGPT / Claude 是 https 页面，content script 里 fetch("http://127.0.0.1:8787")
 // 会被浏览器按 mixed-content 拦截；service worker 发起的请求不受该限制。
-const BASE = 'http://localhost:8787';
+// 注意：这里用 127.0.0.1 而非 localhost —— server 只监听 IPv4，Chrome 在 Windows 上
+// 常把 localhost 解析成 ::1(IPv6) 导致 "Failed to fetch"，显式写 IPv4 绕过。
+const BASE = 'http://127.0.0.1:8787';
 const ROUTES = {
   BRIDGE_TURN: '/turn',
   BRIDGE_DIAGNOSE: '/diagnose',

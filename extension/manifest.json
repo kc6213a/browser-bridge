@@ -9,7 +9,8 @@
     "https://chat.openai.com/*",
     "https://claude.ai/*",
     "http://localhost:8787/*",
-    "https://localhost:8787/*"
+    "https://localhost:8787/*",
+    "http://127.0.0.1:8787/*"
   ],
   "background": {
     "service_worker": "background.js"

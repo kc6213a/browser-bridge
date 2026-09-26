@@ -111,8 +111,22 @@
   // ---------------------------------------------------------------
   const NAV_FILTER = 'nav, header, footer, aside, .sidebar, [role="navigation"], ' +
     '[role="banner"], [role="complementary"], [role="contentinfo"], script, style';
-  const MIN_LEN = 20;
-  const MAX_LEN = 10000;
+  const MIN_LEN = 4;
+  const MAX_LEN = 5000;
+
+  // ChatGPT / 通用 UI chrome 特征词：命中即视为非消息（顶栏 / 侧边栏 / 建议条 / 登录区等）。
+  // 真实对话文本几乎不会包含这些词；即便个别包含，最坏只是漏抓一条兜底候选，影响极小。
+  const CHROME_NOISE = [
+    '新聊天', '定时任务', '插件', '升级', '资料库',
+    '登录', '注册', '订阅', 'Upgrade', 'Log in', 'Sign up',
+  ];
+
+  function isChromeNoise(text) {
+    for (const kw of CHROME_NOISE) {
+      if (text.indexOf(kw) >= 0) return true;
+    }
+    return false;
+  }
 
   function collectGenericLayer() {
     let all;
@@ -122,16 +136,29 @@
       return { selectorUsed: null, items: [] };
     }
 
-    // 过滤 1：长度 + 非导航区 + 可见性
+    // 过滤 1：长度 + 非导航区 + 非 bridge 面板
     let cands = all.filter((el) => {
-      if (el.closest && el.closest(NAV_FILTER)) return false;
+      if (el.closest && el.closest(NAV_FILTER)) return false;       // 导航/侧边/页脚等
+      if (el.closest && el.closest('[data-bridge-panel]')) return false; // bridge 自己的面板（防御性；Shadow DOM 已物理隔离）
       const t = (el.innerText || el.textContent || '').trim();
-      if (t.length < MIN_LEN || t.length > MAX_LEN) return false;
+      if (!t) return false;
+      if (t.length < MIN_LEN || t.length > MAX_LEN) return false;   // 太短 / 太长
       return true;
     });
     if (!cands.length) return { selectorUsed: null, items: [] };
 
-    // 过滤 2：去掉「祖先包着另一个候选」的外层容器，只保留最内层文本块
+    // 过滤 2：只保留疑似消息（排除 UI 控件 + chrome 特征词）
+    cands = cands.filter((el) => {
+      if (el.getAttribute && (
+        el.getAttribute('role') === 'button' || el.hasAttribute('tabindex')
+      )) return false;                                              // 按钮 / 可聚焦控件不是消息
+      const t = (el.innerText || el.textContent || '').trim();
+      if (isChromeNoise(t)) return false;                          // UI chrome 文本
+      return true;
+    });
+    if (!cands.length) return { selectorUsed: null, items: [] };
+
+    // 过滤 3：去掉「祖先包着另一个候选」的外层容器，只保留最内层文本块
     const set = new Set(cands);
     cands = cands.filter((el) => {
       for (const child of el.querySelectorAll('div, article')) {
