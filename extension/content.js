@@ -246,6 +246,8 @@
         }
       });
     } catch (e) {
+      const msg = String(e && e.message || e);
+      if (msg.indexOf('Extension context invalidated') >= 0) return;  // 静默
       console.warn('[browser-bridge] sendMessage error: ' + e);
     }
   }
