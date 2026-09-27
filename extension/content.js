@@ -233,6 +233,10 @@
   }
 
   function post(type, payload) {
+    // 防 context invalidated：扩展重载后旧脚本仍挂在已打开的页面上
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) {
+      return;  // 静默退出，不再刷红字
+    }
     try {
       chrome.runtime.sendMessage(payload, (resp) => {
         if (!resp || !resp.ok) {
