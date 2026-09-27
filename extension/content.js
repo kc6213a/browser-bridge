@@ -119,6 +119,7 @@
   const CHROME_NOISE = [
     '新聊天', '定时任务', '插件', '升级', '资料库',
     '登录', '注册', '订阅', 'Upgrade', 'Log in', 'Sign up',
+    '今天有什么计划？', '你今天在想些什么？',   // #14：ChatGPT 输入框占位文案
   ];
 
   function isChromeNoise(text) {
@@ -152,6 +153,8 @@
       if (el.getAttribute && (
         el.getAttribute('role') === 'button' || el.hasAttribute('tabindex')
       )) return false;                                              // 按钮 / 可聚焦控件不是消息
+      // #14：排除输入框 / contenteditable 内的文本（ChatGPT 输入框占位文案）
+      if (el.closest && el.closest('[contenteditable="true"], [role="textbox"]')) return false;
       const t = (el.innerText || el.textContent || '').trim();
       if (isChromeNoise(t)) return false;                          // UI chrome 文本
       return true;
