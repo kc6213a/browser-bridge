@@ -114,4 +114,48 @@
     可以把同一项目的对话集…」已落成 topic 节点 → #42 现象侧实证完成。
     （注：若走 ①「project_id 作分区键」，其 DOM 可读取性仍是独立技术探针问题，非本条阻塞。）
   状态：open，仅记录，不动代码。
+- #43（2026-10-09 诊断，**fixed 本次**）：**L1 `querySelector` 只取第一个匹配块，DeepSeek 只抓到 thinking**。
+  根因：`content.js` collectSiteLayer 用 `el.querySelector(cfg.textSelector)`（**单数**），
+  遇逗号选择器只返回 DOM 序第一个；DeepSeek 先渲染 `.ds-think-content`（思考）后渲染 `.ds-markdown`
+  （正式回答）→ 正式回答整段丢失。
+  证据：新段（turn≥400）50 条 assistant **全是思考文体**（「我们需要回答用户…」「让我来审阅一下这个…」
+  「The user has pasted back my own previous review verbatim.」）；反证 turn 584/585 无可见 thinking 块
+  时抓到了正式回答 → 机制自洽。非截断（L1 无 MAX_LEN，MAX_LEN 只在 L2 用）。
+  修法：**`assistantPrimary` 字段 + 优先取正式回答块**（2026-10-09 已改 content.js，仅此一文件）。
+  ⚠️ **首版修法选错过选择器**（`".ds-markdown"` 无效，真机二验仍抓 thinking）：
+  DOM 探针（凯文实跑）证明 **thinking 容器里也有一个 `.ds-markdown`**（思考内容同样走 markdown 渲染器，
+  DOM 序在正式回答之前，长度 16036 vs 正式回答 1798）→ 选到假的那个。
+  现行值：`assistantPrimary: '[class*="ds-assistant-message"]'`（正式回答的 markdown 类名带此后缀，
+  用类名特征排除 thinking，不依赖 DOM 层级；备选 `:scope > .ds-markdown` 未采用）。
+  状态：fixed（待真机验证后 commit）。
+- #44（2026-10-09 诊断，open）：**page load 全量重抓导致同一消息多条 turn**。
+  现象：刷新页面时 bridge 抓整段可见历史，同一条消息被多次写入（turn 565/590 内容重复，长度 1057 vs 2570）。
+  影响：turns.jsonl 有重复；可能污染 state 计数。
+  修法候选：content.js 记录 `last_reported_message_id`，只发新的。
+  状态：open（独立现象，不阻塞 #43）。
+- #45（2026-10-09 凯文记，**优先级高**，open）：**EventStore 无坏行容错，单行损坏 = 整库加载失败 + 静默丢弃**。
+  现象：`event_log.jsonl` 单行非 JSON → EventStore 加载整批抛异常 → **所有新事件静默丢弃**
+  （只在 `turn._runtime.status=error` 才可见，面板/state 表面无异常）。
+  根因：① 写入端无完整性校验（坏行实锤是**未走 JSON 序列化的裸文本**，如
+  「n股价跌→企业融资困难→基本面恶化→股价再跌…」）；② 加载端遇坏行抛异常整批失败，不做跳过。
+  复发史：**第三次** —— 2026-09-28（删第 292 行）、2026-10-09（删第 652 行，备份 `.bak_pre_652fix`），
+  且两次都是清创（删行），**根因未修**。
+  修法：① 写入前序列化成字符串并 `json.loads` 自校验（不合法就不落盘 + 报警）；
+        ② 加载端遇坏行**跳过 + 记日志**，不阻塞整库，坏行另存 quarantine 文件。
+  优先级：**高**（已复发三次，且丢失静默，属于数据完整性事故而非功能 bug）。
+  关联：#13（event_log 完整性）是本条的**症状条**——#13 记「坏了要修」，#45 记「为什么会坏 + 怎么不再坏」；
+    修 #45 即根治 #13。
+  状态：open，未动代码（本次仅清创）。
+- #46（2026-10-09 turn 648 实证，凯文立，**优先级高**，open）：**流式生成早期抓取中间状态入库**。
+  现象：流式生成早期 `.ds-assistant-message` 类还没渲染 → `assistantPrimary` 查询返回 null →
+  退回抓整个 `.ds-message` 容器 → **「正在思考 正在思考」占位 + thinking 一起入库**（turn 648，1394 字）。
+  同族：**#44**（page load 全量重抓）——两者是同一族「抓太早 + 抓太多次」的不同表现。
+  与 #43 的关系：**不同层**。#43 是选择器层（选错块，已修对）；#46 是触发层（抓太早，未修）。
+  修 #43 不解决 #46，修 #46 也不需要 #43 的改动 → 分开做（凯文 01:16 拍板 A）。
+  修法：等生成完成再抓（debounce + 完成态检测）。
+  ⚠️ 风险提示（凯文）：改 debounce 是动 `MutationObserver` 触发层，改错会导致漏抓/延迟抓/永不抓，
+  属高风险改动，需单独评估而非顺手改。
+  证据：同一条消息「Python 异步的三种并发模型」被抓 3 次（turn 633/634/648），全为中间状态；
+  而 645/646/647 抓到正文 → **抓取时机决定成败，非选择器**。
+  状态：open。
 

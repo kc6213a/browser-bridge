@@ -40,6 +40,9 @@
       roleFromContent: true,
       assistantSelector: ".ds-markdown, .ds-think-content",
       textSelector: ".ds-markdown, .ds-think-content",
+      // 注意：.ds-markdown 在 thinking 容器里也有一份（假 markdown），DOM 序在正式回答之前。
+      // 正式回答的 markdown 类名带 ds-assistant-message-* 后缀，用类名特征排除 thinking。
+      assistantPrimary: '[class*="ds-assistant-message"]',
       noFallbackToGeneric: true,
     },
   };
@@ -103,7 +106,10 @@
           role = el.querySelector(cfg.assistantSelector) ? 'assistant' : 'user';
         }
         let node = el;
-        if (cfg.textSelector) {
+        // DeepSeek：优先取正式回答块，thinking 不进正文
+        if (cfg.assistantPrimary) {
+          node = el.querySelector(cfg.assistantPrimary) || node;
+        } else {
           const t = el.querySelector(cfg.textSelector);
           if (t) node = t;
         }
