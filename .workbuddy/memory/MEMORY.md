@@ -81,7 +81,7 @@
   **events 21→20、nodes 5→4、version 21→20**（version 沿用 `== len(events)` 口径），两份 md5 一致。
   ⚠️ 残留（按「其他一律不动」保留）：`working_state.recent_changes` 里的
   `NEW_TOPIC@turn=10` / `NEW_TOPIC:accepted@turn=10` 及 `relevant_turns` 的 10，未同步剔除。
-- #40（2026-10-08 DeepSeek 面板实测，open）：**state 未按平台分区，面板显示混合议题**。
+- #40（2026-10-08 DeepSeek 面板实测，**2026-10-09 已修 → fixed**）：**state 未按平台分区，面板显示混合议题**。
   现象：DeepSeek 页打开面板，看到 ChatGPT 的议题混在一起。
   根因：state.json 全局唯一，节点无 source/platform 字段。
   影响：多平台（chatgpt/claude/deepseek）使用时无法区分议题来源。
@@ -94,6 +94,24 @@
     剩下的是主观判断（干扰 vs 帮助），待凯文看面板后拍板。
   状态：open。注：Sprint 20 实测 CA state 已含 deepseek turn 530~536 与 chatgpt turn 528/529 同池，
     混合已实际发生；方向 A 成本最低、且不动 judge 链路，倾向优先评估。
+  ✅ **2026-10-09 凯文拍板走 B（按 hostname 分区），已实现**：
+    - 目录：CA 权威 `runtime/hosts/<host>/{state.json,event_log.jsonl}`；
+      Bridge 镜像 `received/runtime/hosts/<host>/{state.json,events.jsonl}`；
+      迁移前混合文件备份在 `runtime/_archive_pre_split/`（原文件只读不动）。
+    - 路由：`/turn` 读 `payload.source`；`/state?host=`、`/effects?host=`；
+      空/未知 source → `_unknown` 兜底桶，不崩。桶在锁内惰性创建，启动时从 hosts/ 预建。
+      **turn 号、去重键、turn→at 映射仍是全局**（turn 编号不能跨 host 撞车）。
+    - effects 保持**全局单流**（id 必须跨 host 单调递增，`after_id` 才有意义）+ 每条打 `host` 标记，
+      `/effects?host=` 过滤。
+    - 迁移脚本 `Conversation Agent/runtime/migrate_split.py`（**不进 git**，一次性工具，可 `--dry-run`）：
+      节点/事件按 `source_turns` / `evidence.turns` 查 turns.jsonl 的 source 归属；
+      跨 host 的边**丢弃**（宁可丢边，不制造假父子）；`version = len(events)` 口径不变。
+    - 实测迁移：chatgpt.com 41 节点/109 事件，chat.deepseek.com 25/117，s16-accept 0/2，
+      **总计 66 节点 / 228 事件 / 934 行守恒，dropped edges=0，坏行 0**；
+      `/state?host=` 交叉污染检查 **0**。
+    - 隔离实例验证 `/turn` 路由：两个新 host 桶按需创建、各自落盘。
+    - commit：bridge `1d918e6`（server）+ `18e2cdd`（panel）。
+  ⚠️ 遗留：`s16-accept` 是一次性测试 source 留下的桶（0 节点/2 事件），未清理。
 - #41（2026-10-08 p1_review 实验，open）：**extractor 抽「内容」不等于抽「议题结构」**。
   现象：陈述级内容（60%=15/25、v1 退役）抽得准；章节级子议题（seq50/seq43/B-1/v2 开工）没成节点。
   根因：当前 schema 只有 assumptions/conclusions/dependencies，缺 topics/subtopics/parent 维度。
