@@ -229,11 +229,9 @@
 
     for (const item of ordered) {
       const t = item.node;
-      const turns = t.source_turns || [];
-      const turn = turns.length ? turns[0] : '?';
       const isChild = item.depth > 0;
       body.appendChild(
-        withAt(row((isChild ? '└ ' : '') + (t.title || '') + '  [turn ' + turn + ']', c, {
+        withAt(row((isChild ? '└ ' : '') + (t.title || ''), c, {
           paddingLeft: isChild ? '14px' : '0px',
           color: isChild ? c.sub : c.text,
         }), t, c)
