@@ -39,7 +39,7 @@
 ## Backlog
 - #7（凯文提，未修）：state_updater 内联派生 vs event_deriver 外置派生的职责边界，v0.2 统一。
 - #8（已由 Sprint 4 修）：assistant 消息污染 state → on_turn 按 source_role 分路，非 user 只记录不动 state。
-- #11 幻觉 span / #13 JSON 截断（均未修）。
+- #11 幻觉 span（未修）/ #13 JSON 截断（**2026-09-28 fixed**：删除 `event_log.jsonl` 第 292 行坏行，runtime 恢复）。
 - #14（2026-09-27 升级优先级，凯文拍板）：Chrome 误抓影响用户可见内容——L2 把 ChatGPT 输入框占位文案
   「你今天在想些什么？」误抓进消息流（新证据：噪音开始进 panel/state）。
   修法两条：① 轻：CHROME_NOISE 词表加「你今天在想些什么？」；② 根：L2 只抓 `[data-message-author-role]`
@@ -54,11 +54,7 @@
   现状：Sprint 18 已从 manifest 撤回（`git diff extension/` 为空，deepseek 0 处），**不再尝试**。
   污染已清理：两份 state.json 重置到 version 21 / 5 nodes / 21 events（备份 `*.bak_pre_s18revert`）。
   ⚠️ 若重启 server 前又进消息，内存里的 163 版会覆盖写回盘上。
-- #19（2026-09-27 凯文记，**不动**）：重载扩展后，已打开页面里的**旧 content.js 仍存活**并继续
-  `chrome.runtime.sendMessage` → Console 刷 "Extension context invalidated" 红字。
-  影响：仅日志噪音，不影响功能（新脚本已接管），但用户视觉上能看到。
-  修法（二选一，未定）：① `post()` 里 catch 该特定错误静默忽略；② boot/发送前检测 `chrome.runtime?.id` 是否存在。
-  优先级：**低**（只在扩展重载后、且页面未刷新时出现；刷新页面即消失）。
+- #19（2026-09-27 凯文记，**已并入 #28**）：重载扩展后旧 content.js 仍存活刷 "Extension context invalidated" 红字——与 #28 同因（context invalidated 防护），已于 2026-09-27 commit `65483fd` 修复（`chrome.runtime.id` guard + catch 静默），#28 标 fixed，本条并入。
 - #20（2026-09-27 凯文拍板，**不动**）：Event Judge 附加输出 `cognitive_relevance`。
   来源：另一 GPT 提的「会话价值判断层」建议，凯文**部分采纳**。
   - ✅ 采纳：judge 在现有调用里**多吐一个字段**（`low|medium|high` + reason），
@@ -68,12 +64,7 @@
     ② 临时议题过期机制（需要时间轴，属另一个 Sprint 的工作量）。
   - 依赖：先修 **#14（L2 失控）+ #13（event_log 完整性）**。
   - 触发条件：**freeze 一周后**，实测若发现「简单问答污染严重」才做。
-- #21（2026-09-28 重新定性，**高优先级**）：**采集层 role 错标 —— 所有下游问题的地基**。
-  新证据：236 条 user 消息里约 4 条是 assistant 长文被错标成 user（采集层 role 错乱，非用户粘贴）。
-  历史锚点：由 2026-09-27 真机 turn 7/8（同一条 assistant 回复 L1/L2 各抓、role 都记 user，致 #8 防线失效、USER_REFERENCES_PAST:acc+2×DEPENDENCY_DECLARED:acc 已进 state）升级而来；原 #8a 即此现象子条目。
-  影响链条：① Gate 4 的 21 条"user 认知"至少 4 条非用户说的；② schema 加 role 也修不了（role 本身错）；
-  ③ 换 Transport 也修不了（错标在采集层内部）。定性从"独立 bug"升级为下游 #34/#35/#36 共同地基。
-  优先级：下一 Sprint 第一优先。状态：open 高优先级。
+- #21（2026-09-28 Sprint 19 结论，**已并入 #35**）：原以为「采集层 role 错标——所有下游地基」，经 Sprint 19 链路重查**推翻**——`server.py:264` 原样落盘、`content.js:85` 直接读 DOM 属性、L1 全量 120 条 role 分布正常（assistant:62/user:58）、turn 8 的 mid 关联到 `diagnose_20260927_003425.json` 实锤其在真实 ChatGPT DOM 即 `data-message-author-role="user"`（用户把 assistant 输出粘回输入框）→ **非采集层 bug，地基没坏**。统一根因（与 #35 同源）：系统把传输层「节点是 user 角色」等同语义层「内容由用户创作」，分不清「用户发的消息（role 事实）」与「用户输入内容原本来自哪（authorship 语义）」。频率低（1-1.5%），按用户拍板：不修、继续观察，回 freeze。
 - #22（2026-09-27 真机发现，**不动**）：**L1/L2 双写仍在**。
   证据：同一条消息被两层各抓一次 → 两条 turn、两个不同 `message_id`
   （turn 12 = layer2 `h:7251cc6d` fallback hash；turn 13 = layer1 `attr:data-message-id` `315b39f9-…`），
@@ -90,4 +81,37 @@
   **events 21→20、nodes 5→4、version 21→20**（version 沿用 `== len(events)` 口径），两份 md5 一致。
   ⚠️ 残留（按「其他一律不动」保留）：`working_state.recent_changes` 里的
   `NEW_TOPIC@turn=10` / `NEW_TOPIC:accepted@turn=10` 及 `relevant_turns` 的 10，未同步剔除。
+- #40（2026-10-08 DeepSeek 面板实测，open）：**state 未按平台分区，面板显示混合议题**。
+  现象：DeepSeek 页打开面板，看到 ChatGPT 的议题混在一起。
+  根因：state.json 全局唯一，节点无 source/platform 字段。
+  影响：多平台（chatgpt/claude/deepseek）使用时无法区分议题来源。
+  两种方向（待凯文拍板，未实现）：
+    A. 保持全局，节点加 `source` 字段（轻：只改 schema 常量 + 面板按 source 着色/筛选；
+       采集层 turn 已有 source 维度，state 节点补写即可，不碰 `build_judge_prompt`，无回归闸门风险）。
+    B. 按 hostname 分区 state（重：采集/存储/state_updater/event_deriver/面板/抽取全改，多份 state.json）。
+  依赖：**已有实证（turn 553）** —— 2026-10-09 用户在面板上亲眼看到「我看到面板了。里面的统计内部
+    是包含的gpt部分的」，并已落成 topic 节点 → 混合现象确认，不再是假设；
+    剩下的是主观判断（干扰 vs 帮助），待凯文看面板后拍板。
+  状态：open。注：Sprint 20 实测 CA state 已含 deepseek turn 530~536 与 chatgpt turn 528/529 同池，
+    混合已实际发生；方向 A 成本最低、且不动 judge 链路，倾向优先评估。
+- #41（2026-10-08 p1_review 实验，open）：**extractor 抽「内容」不等于抽「议题结构」**。
+  现象：陈述级内容（60%=15/25、v1 退役）抽得准；章节级子议题（seq50/seq43/B-1/v2 开工）没成节点。
+  根因：当前 schema 只有 assumptions/conclusions/dependencies，缺 topics/subtopics/parent 维度。
+  修法候选：
+    A. schema 加 `topics` 桶（改 extract.py 输出 + 潜在下游消费方）；
+    B. 依赖 markdown `##` 标题分段（格式依赖，只对结构化报告有效，对真实对话失效）；
+    C. 先不动，等真实长对话再评估。
+  建议：**C**（凯文：输入样本是单轮审查报告，不对；且「抽出的议题结构怎么用」未定）。
+  状态：open。关联：与 extractor_gate 实验同源；p1_review 实测 evidence 24/24 但四子议题未浮出节点，
+    印证「内容抽得准 ≠ 议题结构抽得出」。
+- #42（2026-10-09 凯文观察，open）：**平台项目功能对产品定位的影响**。
+  现象：ChatGPT/Claude 等网页端已有 project 功能（容器级）。
+  启发：① 项目 ID 可作 state 分区键 → **天然解决 #40**（相当于给 #40 多一条分区轴：project 而非 hostname，
+       且更贴合用户心智）；② 用户痛点可能从「会话内」升级到「项目级」；
+       ③ 平台做了容器层，留了结构层给我们（分工：平台管容器，我们管结构）。
+  风险：平台容器可能已满足多数用户；我们只服务「真需要结构」的那部分——定位收窄，不是坏事但要看清。
+  依赖：**已有实证（turn 602）** —— 2026-10-09 用户真实对话「现在网页端的 llm 都有类似项目的功能，
+    可以把同一项目的对话集…」已落成 topic 节点 → #42 现象侧实证完成。
+    （注：若走 ①「project_id 作分区键」，其 DOM 可读取性仍是独立技术探针问题，非本条阻塞。）
+  状态：open，仅记录，不动代码。
 
