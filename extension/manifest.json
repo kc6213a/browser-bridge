@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Bridge",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "抓取网页 LLM 会话消息并自诊断 DOM 结构，转发到本地 agent 接收端 (localhost:8787)",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": [
@@ -25,7 +25,7 @@
         "https://chat.deepseek.com/*",
         "http://localhost/*"
       ],
-      "js": ["content.js"],
+      "js": ["project_id.js", "content.js"],
       "run_at": "document_idle"
     },
     {
@@ -35,7 +35,7 @@
         "https://claude.ai/*",
         "https://chat.deepseek.com/*"
       ],
-      "js": ["panel.js"],
+      "js": ["project_id.js", "panel.js"],
       "run_at": "document_idle"
     }
   ]

@@ -36,9 +36,25 @@
   if (!TEST_MODE && !hostOk) return; // 真实站点且不在白名单 -> 不注入
 
   const BASE = (OVERRIDE || 'http://127.0.0.1:8787').replace(/\/+$/, '');
-  // 按 hostname 分区：server 侧每个 host 一套 state，面板只拿自己所在站点那份。
-  // 「host 是哪个」由浏览器给出，面板不做任何判断/过滤 —— 那是 server 的事。
-  const STATE_URL = BASE + '/state?host=' + encodeURIComponent(location.hostname || '');
+  // 两级分区：host（哪个站点）+ project（哪个会话/项目）。
+  // 两个键都由浏览器给出，面板不做任何判断/过滤 —— 那是 server 的事。
+  //
+  // ⚠️ 必须是函数、每次轮询重算：ChatGPT/DeepSeek 都是 SPA，切会话只改 URL 不重载页面，
+  //    脚本只在首次加载跑一次的话，切了项目面板还在读旧桶。
+  // project_id 的实现来自 project_id.js（与 content.js 共用，避免两边正则漂移）。
+  function currentProject() {
+    const fn = window.__BRIDGE_PROJECT_ID__;
+    if (typeof fn === 'function') {
+      try { return fn() || ''; } catch (e) { /* ignore */ }
+    }
+    return '';   // 取不到 -> 空串，server 侧兜底 _no_project
+  }
+
+  function stateUrl() {
+    const q = 'host=' + encodeURIComponent(location.hostname || '') +
+              '&project=' + encodeURIComponent(currentProject());
+    return BASE + '/state?' + q;
+  }
   const POLL_MS = 5000;
 
   // ---------------------------------------------------------------
@@ -118,6 +134,13 @@
     btnRow.appendChild(collapseBtn);
     btnRow.appendChild(closeBtn);
     header.appendChild(title);
+    // 当前会话/项目标识（灰色小字）。内容在每次轮询刷新：SPA 切会话只改 URL，
+    // 面板必须跟着换桶，这个标签就是「我现在看的是哪一桶」的唯一肉眼凭据。
+    const sess = el('span', {
+      cls: '__bb_sess__',
+      style: { color: c.sub, fontSize: '11px' },
+    });
+    header.appendChild(sess);
     header.appendChild(btnRow);
 
     // 身体
@@ -139,7 +162,7 @@
     });
 
     if (document.body) document.body.appendChild(host);
-    return { root, body, host };
+    return { root, body, host, sess };
   }
 
   // ---------------------------------------------------------------
@@ -347,15 +370,33 @@
     const p = ensurePanel();
     if (!p) return;
     const c = palette();
+
+    // 每次都重算：SPA 切会话不重载页面，URL 变了面板就得跟着换桶。
+    const proj = currentProject();
+    const labelFn = window.__BRIDGE_PROJECT_LABEL__;
+    const label = (typeof labelFn === 'function') ? labelFn(proj) : null;
+    // server 回的 state 里也带了 project（响应层附加，不落盘），用它做二次确认：
+    // 面板请求的桶 ≠ 实际拿到的桶 时说明路由错了，肉眼能立刻看出来。
+    let served = null;
+
     try {
-      const resp = await fetch(STATE_URL, { cache: 'no-store' });
-      if (!resp.ok) { renderDisconnected(p.body, c); return; }
-      const data = await resp.json();
-      // 约定：缺失文件时 server 返回 {"ok": true, "state": null}
-      const state = (data && data.state !== undefined) ? data.state : data;
-      renderState(state, p.body, c);
+      const resp = await fetch(stateUrl(), { cache: 'no-store' });
+      if (!resp.ok) { renderDisconnected(p.body, c); }
+      else {
+        const data = await resp.json();
+        // 约定：缺失文件时 server 返回 {"ok": true, "state": null}
+        const state = (data && data.state !== undefined) ? data.state : data;
+        served = (data && data.project !== undefined) ? data.project : null;
+        renderState(state, p.body, c);
+      }
     } catch (e) {
       renderDisconnected(p.body, c);
+    }
+
+    if (p.sess) {
+      let txt = label ? ('会话 ' + label) : '会话 未识别';
+      if (served && served !== (proj || '_no_project')) txt += ' ⚠ 桶=' + served;
+      p.sess.textContent = txt;
     }
   }
 

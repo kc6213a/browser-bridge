@@ -59,6 +59,20 @@
     return location.hostname || '';
   }
 
+  // ---------------------------------------------------------------
+  // 会话/项目标识（2026-10-09）
+  //
+  // 实现在 project_id.js（content.js 与 panel.js 共用同一份，避免两处正则漂移
+  // 导致面板去请求另一个桶）。manifest 里 project_id.js 必须排在前面。
+  // ---------------------------------------------------------------
+  function projectId() {
+    const fn = window.__BRIDGE_PROJECT_ID__;
+    if (typeof fn === 'function') {
+      try { return fn(); } catch (e) { /* ignore */ }
+    }
+    return null;   // 共享文件没加载 -> 宁可落 _no_project，不猜
+  }
+
   function lookupSiteConfig(hostname) {
     const host = String(hostname || '').toLowerCase();
     for (const key of Object.keys(SITE_SELECTORS)) {
@@ -241,6 +255,7 @@
       url: location.href,
       hostname: location.hostname,
       site_key: siteKey(),
+      project_id: projectId(),
       site_selector_hit: result.siteHit,
       layer: result.layer,
       selector_used: result.selectorUsed,
@@ -341,6 +356,7 @@
         text: it.text,
         message_id: it.message_id,
         message_id_source: it.message_id_source,
+        project_id: projectId(),
         at: new Date().toISOString(),
       });
     }
