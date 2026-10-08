@@ -179,9 +179,17 @@
     return nodeEl;
   }
 
+  // 按最后活跃时间倒序（最新的在前）。at_last 缺失视为 ''，排到末尾。
+  // Array.prototype.sort 在现代 JS 里稳定：时间相同的节点保持 state 原有顺序。
+  function sortByLastActive(nodes) {
+    return [...nodes].sort((a, b) =>
+      (b.at_last || '').localeCompare(a.at_last || '')
+    );
+  }
+
   function renderAssumptions(state, body, c) {
     body.appendChild(blockTitle('假设', c));
-    const nodes = (state.nodes || []).filter((n) => n.type === 'assumption');
+    const nodes = sortByLastActive((state.nodes || []).filter((n) => n.type === 'assumption'));
     if (!nodes.length) { body.appendChild(row('（无）', c, { color: c.sub })); return; }
     for (const a of nodes) {
       const versions = a.versions || [];
@@ -199,7 +207,9 @@
   //   - v0.1 只支持一级（不递归孙节点）、无折叠、无交互、无关联边。
   function renderTopics(state, body, c) {
     body.appendChild(blockTitle('议题', c));
-    const all = (state.nodes || []).filter((n) => n.type === 'topic');
+    // 先按最后活跃时间倒序；下面的父前子后排序在这个顺序上展开，
+    // 于是「父按时间倒序、子紧跟其父并保持缩进」，层级渲染本身不变。
+    const all = sortByLastActive((state.nodes || []).filter((n) => n.type === 'topic'));
     if (!all.length) { body.appendChild(row('尚无议题', c, { color: c.sub })); return; }
 
     const byId = {};
@@ -241,7 +251,7 @@
 
   function renderConclusions(state, body, c) {
     body.appendChild(blockTitle('结论', c));
-    const nodes = (state.nodes || []).filter((n) => n.type === 'conclusion');
+    const nodes = sortByLastActive((state.nodes || []).filter((n) => n.type === 'conclusion'));
     if (!nodes.length) { body.appendChild(row('（无）', c, { color: c.sub })); return; }
     for (const cn of nodes) {
       const health = cn.health || '';
