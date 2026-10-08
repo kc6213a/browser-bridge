@@ -76,6 +76,17 @@ _effect_seq = 0          # 单调递增 effect id；跨重启续编号
 # 纯内存派生视图，不写回 turns.jsonl / state.json，重启由 _prime_from_disk 重建。
 _turn_at = {}
 
+# ---- 按 hostname 分区 runtime（每个 host 一套 state + event_log）----
+# 迁移前的旧混合文件仍留在 AGENT_HOME/runtime/ 下（state.json / event_log.jsonl），
+# 只作为 _archive_pre_split 的备份来源，server 不再读写它们。
+HOSTS_ROOT = os.path.join(AGENT_HOME, "runtime", "hosts")          # CA 侧（权威）
+BRIDGE_HOSTS_ROOT = os.path.join(RUNTIME_DIR, "hosts")             # Bridge 侧（面板读的镜像）
+DEFAULT_HOST = "_unknown"                                          # source 缺失/未知时的兜底桶
+
+# host -> {"obj","llm","state","state_file","event_log","bridge_state","bridge_events","host"}
+RUNTIMES = {}
+
+# 仍然保留：全局接线状态（导入的 runtime 类 + llm），各 host 桶共享同一个 llm 实例。
 RUNTIME = {
     "status": "not-wired",
     "home": AGENT_HOME,
@@ -87,6 +98,30 @@ RUNTIME = {
 
 os.makedirs(RECV_DIR, exist_ok=True)
 os.makedirs(RUNTIME_DIR, exist_ok=True)
+
+
+def _safe_host(raw):
+    """hostname -> 桶名。空 / unknown / 无意义值 -> _unknown；其余做路径安全化。"""
+    s = (raw or "").strip()
+    if not s or s.lower() in ("unknown", "null", "none", "undefined"):
+        return DEFAULT_HOST
+    out = []
+    for ch in s:
+        out.append(ch if (ch.isalnum() or ch in "._-") else "_")
+    return "".join(out) or DEFAULT_HOST
+
+
+def _host_paths(host):
+    """一个 host 的四条路径：CA 权威 state/event_log + Bridge 镜像 state/events。"""
+    ca = os.path.join(HOSTS_ROOT, host)
+    br = os.path.join(BRIDGE_HOSTS_ROOT, host)
+    return {
+        "host": host,
+        "state_file": os.path.join(ca, "state.json"),
+        "event_log": os.path.join(ca, "event_log.jsonl"),
+        "bridge_state": os.path.join(br, "state.json"),
+        "bridge_events": os.path.join(br, "events.jsonl"),
+    }
 
 
 def _log(msg):
@@ -149,19 +184,72 @@ def init_runtime():
     elif LLM_MODE != "none":
         raise SystemExit("[FATAL] BRIDGE_LLM 只接受 real|none，收到 %r" % LLM_MODE)
 
-    state = load_or_init_state(STATE_FILE, conversation_id="browser-bridge")
-    rt = AgentRuntime(store=EventStore(EVENT_LOG), state=state, llm=llm)
-
+    # 分区后：这里只做「接线」（把类与 llm 存起来），真正建桶交给 init_host_runtime。
     RUNTIME.update({
         "status": "wired",
-        "obj": rt,
         "llm": llm,
-        "state": state,
         "_save_state": save_state,
-        "event_log": EVENT_LOG,
+        "_AgentRuntime": AgentRuntime,
+        "_load_or_init_state": load_or_init_state,
+        "_EventStore": EventStore,
     })
-    _log("RUNTIME wired home=%s llm=real(%s) event_log=%s state_file=%s"
-         % (AGENT_HOME, llm.model if llm else "none", EVENT_LOG, STATE_FILE))
+    _log("RUNTIME wired home=%s llm=%s hosts_root=%s"
+         % (AGENT_HOME, (llm.model if llm else "none"), HOSTS_ROOT))
+
+
+def init_host_runtime(host):
+    """为一个 host 建独立 runtime（state + event_log 各自一份）。"""
+    if RUNTIME["status"] != "wired":
+        raise SystemExit("[FATAL] runtime 未接线，无法为 host=%s 建桶" % host)
+    p = _host_paths(host)
+    os.makedirs(os.path.dirname(p["state_file"]), exist_ok=True)
+    os.makedirs(os.path.dirname(p["bridge_state"]), exist_ok=True)
+
+    state = RUNTIME["_load_or_init_state"](p["state_file"], conversation_id="browser-bridge")
+    rt = RUNTIME["_AgentRuntime"](
+        store=RUNTIME["_EventStore"](p["event_log"]), state=state, llm=RUNTIME["llm"]
+    )
+    RUNTIMES[host] = {
+        "host": host,
+        "obj": rt,
+        "state": state,
+        "llm": RUNTIME["llm"],
+        "_save_state": RUNTIME["_save_state"],
+        "status": "wired",
+        **{k: v for k, v in p.items() if k != "host"},
+    }
+    _log("HOST wired host=%s state=%s event_log=%s nodes=%d"
+         % (host, p["state_file"], p["event_log"], len(state.get("nodes") or [])))
+    return RUNTIMES[host]
+
+
+def get_runtime(host):
+    """按需建桶（不在锁内调用 persist，避免死锁）。"""
+    bucket = RUNTIMES.get(host)
+    if bucket is not None:
+        return bucket
+    with _lock:
+        bucket = RUNTIMES.get(host)
+        if bucket is None:
+            bucket = init_host_runtime(host)
+    return bucket
+
+
+def _prime_known_hosts():
+    """启动时把已迁移的 host 桶预建起来，避免首个 /state 才建桶。"""
+    hosts = set()
+    if os.path.isdir(HOSTS_ROOT):
+        for name in os.listdir(HOSTS_ROOT):
+            if os.path.isdir(os.path.join(HOSTS_ROOT, name)):
+                hosts.add(name)
+    if not hosts:
+        hosts.add(DEFAULT_HOST)
+    for h in sorted(hosts):
+        try:
+            init_host_runtime(h)
+        except Exception as e:
+            _log("HOST_INIT_ERROR host=%s :: %s: %s" % (h, type(e).__name__, e))
+    _log("hosts primed: %s" % ",".join(sorted(RUNTIMES.keys())))
 
 
 # ------------------------------------------------------------------
@@ -268,13 +356,23 @@ def _prime_effects():
 # persist：result -> received/runtime/ 三件套
 # ------------------------------------------------------------------
 
-def persist(result, state):
-    """把 TurnResult 落盘。result.records / result.effects 全部写，不挑不选。"""
+def persist(result, state, bucket=None):
+    """把 TurnResult 落盘。result.records / result.effects 全部写，不挑不选。
+
+    bucket 非 None 时：events 与 state 镜像写到该 host 自己的目录（分区）。
+    effects 仍是全局单流（id 必须跨 host 单调递增，after_id 才成立），
+    但每条打上 host 标记，GET /effects?host= 可按 host 过滤。
+    """
     global _effect_seq
+
+    events_path = (bucket or {}).get("bridge_events") or BRIDGE_EVENTS_PATH
+    state_path = (bucket or {}).get("bridge_state") or BRIDGE_STATE_PATH
+    host = (bucket or {}).get("host") or DEFAULT_HOST
 
     with _lock:
         if result.records:
-            with open(BRIDGE_EVENTS_PATH, "a", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(events_path), exist_ok=True)
+            with open(events_path, "a", encoding="utf-8") as f:
                 for rec in result.records:
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
@@ -286,16 +384,17 @@ def persist(result, state):
                     if idx < len(result.records):
                         source_event_id = result.records[idx].get("event_id")
                     _effect_seq += 1
-                    item = {"id": _effect_seq, "source_event_id": source_event_id}
+                    item = {"id": _effect_seq, "source_event_id": source_event_id, "host": host}
                     item.update(eff)
                     _effects_cache.append(item)
                     f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
         if state is not None:
-            tmp = BRIDGE_STATE_PATH + ".tmp"
+            os.makedirs(os.path.dirname(state_path), exist_ok=True)
+            tmp = state_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, BRIDGE_STATE_PATH)
+            os.replace(tmp, state_path)
 
 
 # ------------------------------------------------------------------
@@ -309,6 +408,8 @@ def process_turn(payload):
     source = payload.get("source") or "unknown"
     mid = payload.get("message_id")
     mid_source = payload.get("message_id_source")
+
+    host = _safe_host(source)
 
     key = _dedupe_key(payload)
     with _lock:
@@ -329,11 +430,20 @@ def process_turn(payload):
     # LLM 调用放锁外，避免阻塞 /health
     runtime_block = {"status": "not-called", "error": None, "records": [],
                      "effects": [], "decisions": []}
-    rt = RUNTIME.get("obj")
+    try:
+        bucket = get_runtime(host)
+        rt = bucket["obj"]
+    except SystemExit:
+        raise
+    except Exception as e:
+        rt = None
+        bucket = None
+        _log("HOST_INIT_ERROR turn=%d host=%s :: %s: %s" % (turn_no, host, type(e).__name__, e))
+
     if rt is None:
         runtime_block = {"status": "error", "error": "runtime not wired",
                          "records": [], "effects": [], "decisions": []}
-        _log("RUNTIME_ERROR turn=%d :: runtime not wired" % turn_no)
+        _log("RUNTIME_ERROR turn=%d host=%s :: runtime not wired" % (turn_no, host))
     else:
         try:
             result = rt.on_turn(
@@ -352,11 +462,12 @@ def process_turn(payload):
                 "decisions": result.decisions,
                 "signals": result.signals,
             }
-            persist(result, rt.state)
+            persist(result, rt.state, bucket)
             try:
-                RUNTIME["_save_state"](STATE_FILE, rt.state)
+                RUNTIME["_save_state"](bucket["state_file"], rt.state)
             except Exception as e:  # 状态落盘失败不应该吞掉这一轮结果
-                _log("STATE_SAVE_ERROR turn=%d :: %s: %s" % (turn_no, type(e).__name__, e))
+                _log("STATE_SAVE_ERROR turn=%d host=%s :: %s: %s"
+                     % (turn_no, host, type(e).__name__, e))
 
             # 验收行：格式固定，不许改
             _stdout("[runtime] turn=%d records=%d effects=%d"
@@ -457,11 +568,23 @@ class Handler(BaseHTTPRequestHandler):
                     "status": RUNTIME["status"],
                     "llm": LLM_MODE,
                     "model": RUNTIME["llm"].model if RUNTIME.get("llm") else None,
-                    "event_log": EVENT_LOG,
-                    "state_file": STATE_FILE,
-                    "bridge_events": BRIDGE_EVENTS_PATH,
-                    "bridge_state": BRIDGE_STATE_PATH,
+                    "partitioned": True,
+                    "default_host": DEFAULT_HOST,
+                    "hosts_root": HOSTS_ROOT,
+                    "legacy_event_log": EVENT_LOG,
+                    "legacy_state_file": STATE_FILE,
                     "bridge_effects": BRIDGE_EFFECTS_PATH,
+                },
+                "hosts": {
+                    h: {
+                        "status": b.get("status"),
+                        "nodes": len((b.get("state") or {}).get("nodes") or []),
+                        "version": (b.get("state") or {}).get("version"),
+                        "state_file": b.get("state_file"),
+                        "event_log": b.get("event_log"),
+                        "bridge_state": b.get("bridge_state"),
+                    }
+                    for h, b in sorted(RUNTIMES.items())
                 },
             })
         elif path == "/recent":
@@ -469,7 +592,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/effects":
             self._effects(parse_qs(parsed.query))
         elif path == "/state":
-            self._state()
+            self._state(parse_qs(parsed.query))
         elif path in ("/test-page.html", "/", "/index.html"):
             try:
                 with open(os.path.join(BASE_DIR, "test-page.html"), "rb") as f:
@@ -486,7 +609,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"ok": False, "error": "not found"})
 
     def _effects(self, query):
-        """GET /effects?after_id=N —— 返回 id > N 的 effects；缺省返回全部。"""
+        """GET /effects?after_id=N[&host=H] —— 返回 id > N 的 effects；缺省返回全部。
+
+        effects 是全局单流（id 跨 host 单调递增，after_id 才有意义），
+        每条带 host 标记；给了 host 就只返回该 host 的。
+        """
         raw = (query.get("after_id") or [""])[0]
         if raw.strip() == "":
             after_id = -1          # 缺省 -> 全部
@@ -496,40 +623,48 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self._json(400, {"ok": False, "error": "after_id must be an integer"})
                 return
+        host_raw = (query.get("host") or [""])[0]
+        host = _safe_host(host_raw) if host_raw.strip() else None
         with _lock:
             items = [e for e in _effects_cache if e.get("id", -1) > after_id]
+        if host is not None:
+            items = [e for e in items if e.get("host") == host]
         self._json(200, {
             "ok": True,
             "count": len(items),
             "after_id": after_id,
+            "host": host,
             "items": items,
         })
 
-    def _state(self):
-        """GET /state —— 透传 received/runtime/state.json。
+    def _state(self, query):
+        """GET /state?host=H —— 返回该 host 自己的 state（分区）。
 
+        - host 缺省/未知 -> 兜底桶 _unknown。
         - 文件存在且可解析：原样返回 JSON 内容（前端按 state 直接渲染）。
         - 文件缺失 / 为空 / 解析失败：返回 {"ok": true, "state": null}
           （前端据此显示「尚无数据」）。
-        不改动 /turn /effects /health /diagnose /recent 任何行为。
         """
-        if not os.path.exists(BRIDGE_STATE_PATH):
-            self._json(200, {"ok": True, "state": None})
+        host_raw = (query.get("host") or [""])[0]
+        host = _safe_host(host_raw)
+        state_path = _host_paths(host)["bridge_state"]
+        if not os.path.exists(state_path):
+            self._json(200, {"ok": True, "state": None, "host": host})
             return
         try:
-            with open(BRIDGE_STATE_PATH, "r", encoding="utf-8") as f:
+            with open(state_path, "r", encoding="utf-8") as f:
                 content = f.read().strip()
         except OSError as e:
-            self._json(500, {"ok": False, "error": "state read failed: %s" % e})
+            self._json(500, {"ok": False, "error": "state read failed: %s" % e, "host": host})
             return
         if not content:
-            self._json(200, {"ok": True, "state": None})
+            self._json(200, {"ok": True, "state": None, "host": host})
             return
         try:
             state = json.loads(content)
         except json.JSONDecodeError:
             # 半写/损坏也不崩前端：当作「尚未就绪」
-            self._json(200, {"ok": True, "state": None})
+            self._json(200, {"ok": True, "state": None, "host": host})
             return
         # 附加 at_last：纯响应层派生，只加字段不写回 state.json。
         # 节点没有可用时间戳时给空串，前端据此不渲染。
@@ -596,6 +731,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     init_runtime()
+    _prime_known_hosts()
     _prime_from_disk()
     _prime_effects()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
