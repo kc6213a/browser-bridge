@@ -5,7 +5,7 @@
  * 让用户第一次「用眼睛」看见系统在工作（假设 / 结论 / 依赖 / 最近变化）。
  *
  * 设计约束（来自 Sprint 5 任务书，红线不可破）：
- *  - 只在 chatgpt.com / chat.openai.com / claude.ai 注入（manifest 已按 host 限定；
+ *  - 只在 chatgpt / openai / claude / deepseek 注入（manifest 已按 host 限定；
  *    此处再设一道 host 守卫作为兜底）。测试页可加 html[data-bridge-state-url]
  *    覆盖请求地址并放开 host 限制（仅供本地验证，真实站点无此属性）。
  *  - 每 5 秒轮询 fetch http://localhost:8787/state（够用，不引入 SSE/WebSocket）。
@@ -24,7 +24,7 @@
   if (window.__bridgePanelLoaded) return;
   window.__bridgePanelLoaded = true;
 
-  const ALLOWED_HOSTS = ['chatgpt.com', 'chat.openai.com', 'claude.ai'];
+  const ALLOWED_HOSTS = ['chatgpt.com', 'chat.openai.com', 'claude.ai', 'chat.deepseek.com'];
   const OVERRIDE = (() => {
     try { return document.documentElement.getAttribute('data-bridge-state-url'); }
     catch (e) { return null; }
