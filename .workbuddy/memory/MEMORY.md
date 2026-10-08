@@ -133,7 +133,8 @@
   影响：turns.jsonl 有重复；可能污染 state 计数。
   修法候选：content.js 记录 `last_reported_message_id`，只发新的。
   状态：open（独立现象，不阻塞 #43）。
-- #45（2026-10-09 凯文记，**优先级高**，open）：**EventStore 无坏行容错，单行损坏 = 整库加载失败 + 静默丢弃**。
+- #45（2026-10-09 凯文记，优先级高，**✅ fixed 2026-10-09 01:25，CA commit `aa710b2`**）：
+  **EventStore 无坏行容错，单行损坏 = 整库加载失败 + 静默丢弃**。
   现象：`event_log.jsonl` 单行非 JSON → EventStore 加载整批抛异常 → **所有新事件静默丢弃**
   （只在 `turn._runtime.status=error` 才可见，面板/state 表面无异常）。
   根因：① 写入端无完整性校验（坏行实锤是**未走 JSON 序列化的裸文本**，如
@@ -145,7 +146,14 @@
   优先级：**高**（已复发三次，且丢失静默，属于数据完整性事故而非功能 bug）。
   关联：#13（event_log 完整性）是本条的**症状条**——#13 记「坏了要修」，#45 记「为什么会坏 + 怎么不再坏」；
     修 #45 即根治 #13。
-  状态：open，未动代码（本次仅清创）。
+  ✅ **已修（代码在 CA 仓库 `runtime/event_store.py`，非 bridge 仓库）**：
+    ① 写入端：先 `json.dumps` → `json.loads` 自校验 → 才写；不可序列化/不可 round-trip 直接
+       `EventStoreError`（**宁可写入失败，也绝不写一个读不回来的行**）。
+    ② 读取端：坏行**跳过 + stderr 报告 + 落盘 `<log>.badlines.log`**，不阻塞整库；
+       每个进程每行只报一次（`_reported_bad_lines`），避免 read_all 高频调用刷屏。
+    测试：改写 `test_broken_jsonl_raises`（旧断言「必须抛异常」）为坏行容错 6 例；**全量 66 passed**。
+    真机只读验证：真实 event_log 加载 805 条无异常；含坏行的备份 752 行 → 跳过 1 → 751 条 ✓。
+  状态：**fixed**。
 - #46（2026-10-09 turn 648 实证，凯文立，**优先级高**，open）：**流式生成早期抓取中间状态入库**。
   现象：流式生成早期 `.ds-assistant-message` 类还没渲染 → `assistantPrimary` 查询返回 null →
   退回抓整个 `.ds-message` 容器 → **「正在思考 正在思考」占位 + thinking 一起入库**（turn 648，1394 字）。
