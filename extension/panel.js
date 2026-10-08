@@ -205,10 +205,10 @@
   //   - parent_id 为 null / 指向不存在节点 / 指向自己 -> 顶层，缩进 0
   //   - 有有效 parent_id -> 缩进一级
   //   - v0.1 只支持一级（不递归孙节点）、无折叠、无交互、无关联边。
+  // 排序：纯按最后活跃时间倒序，直接按此顺序渲染 —— 不再把子节点挪到父节点旁边
+  // （那样会让子议题跟着父议题的时间走，打断时间线）。父子关系只体现在缩进上。
   function renderTopics(state, body, c) {
     body.appendChild(blockTitle('议题', c));
-    // 先按最后活跃时间倒序；下面的父前子后排序在这个顺序上展开，
-    // 于是「父按时间倒序、子紧跟其父并保持缩进」，层级渲染本身不变。
     const all = sortByLastActive((state.nodes || []).filter((n) => n.type === 'topic'));
     if (!all.length) { body.appendChild(row('尚无议题', c, { color: c.sub })); return; }
 
@@ -223,23 +223,8 @@
       return (p && p.id !== t.id) ? pid : null;
     };
 
-    // 父在前、子紧随其后；v0.1 仅展开一级。
-    const ordered = [];
     for (const t of all) {
-      if (parentOf(t) !== null) continue;
-      ordered.push({ node: t, depth: 0 });
-      for (const ch of all) {
-        if (parentOf(ch) === t.id) ordered.push({ node: ch, depth: 1 });
-      }
-    }
-    // 防御：理论上不会出现（state_updater 已把无效父置 null），孤儿按顶层兜底显示。
-    for (const t of all) {
-      if (!ordered.some((o) => o.node === t)) ordered.push({ node: t, depth: 0 });
-    }
-
-    for (const item of ordered) {
-      const t = item.node;
-      const isChild = item.depth > 0;
+      const isChild = parentOf(t) !== null;
       body.appendChild(
         withAt(row((isChild ? '└ ' : '') + (t.title || ''), c, {
           paddingLeft: isChild ? '14px' : '0px',
