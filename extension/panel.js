@@ -162,6 +162,23 @@
     return el('div', { text, style });
   }
 
+  // 节点最后活跃时间（server 侧附加的 at_last，'YYYY-MM-DD HH:MM'）。
+  // 面板横向只有 280px，省掉年份只留 'MM-DD HH:MM'。
+  function shortAt(at) {
+    return (typeof at === 'string' && at.length >= 16) ? at.slice(5, 16) : '';
+  }
+
+  // 在行尾追加灰色小字时间；没有时间戳则原样返回，布局零变化。
+  function withAt(nodeEl, node, c) {
+    const s = node && shortAt(node.at_last);
+    if (!s) return nodeEl;
+    nodeEl.appendChild(el('span', {
+      text: ' ' + s,
+      style: { color: c.sub, fontSize: '11px' },
+    }));
+    return nodeEl;
+  }
+
   function renderAssumptions(state, body, c) {
     body.appendChild(blockTitle('假设', c));
     const nodes = (state.nodes || []).filter((n) => n.type === 'assumption');
@@ -171,7 +188,7 @@
       const active = versions.find((v) => v.status === 'active') || versions[versions.length - 1];
       const ver = active && active.version != null ? active.version : '?';
       const val = active && active.value != null ? String(active.value) : '—';
-      body.appendChild(row(a.title + '  ' + val + '  (v' + ver + ')', c));
+      body.appendChild(withAt(row(a.title + '  ' + val + '  (v' + ver + ')', c), a, c));
     }
   }
 
@@ -216,10 +233,10 @@
       const turn = turns.length ? turns[0] : '?';
       const isChild = item.depth > 0;
       body.appendChild(
-        row((isChild ? '└ ' : '') + (t.title || '') + '  [turn ' + turn + ']', c, {
+        withAt(row((isChild ? '└ ' : '') + (t.title || '') + '  [turn ' + turn + ']', c, {
           paddingLeft: isChild ? '14px' : '0px',
           color: isChild ? c.sub : c.text,
-        })
+        }), t, c)
       );
     }
   }
@@ -232,7 +249,9 @@
       const health = cn.health || '';
       const isStale = /stale/i.test(health);
       const label = cn.title + (health ? '  ⚠ ' + health : ''); // ⚠
-      body.appendChild(row(label, c, isStale ? { color: c.stale, fontWeight: '600' } : {}));
+      body.appendChild(
+        withAt(row(label, c, isStale ? { color: c.stale, fontWeight: '600' } : {}), cn, c)
+      );
     }
   }
 

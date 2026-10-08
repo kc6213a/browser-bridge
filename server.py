@@ -72,6 +72,10 @@ _diag_count = 0
 _effects_cache = []      # GET /effects 的内存视图（启动时从 effects.jsonl 灌回）
 _effect_seq = 0          # 单调递增 effect id；跨重启续编号
 
+# {turn_no(int): at(str ISO)} —— 仅供 GET /state 附加 at_last 用。
+# 纯内存派生视图，不写回 turns.jsonl / state.json，重启由 _prime_from_disk 重建。
+_turn_at = {}
+
 RUNTIME = {
     "status": "not-wired",
     "home": AGENT_HOME,
@@ -190,11 +194,51 @@ def _prime_from_disk():
                 continue
             _seen_keys.add(_dedupe_key(rec))
             _turn_seq += 1
+            # at_last 的原料：turn -> 采集时间
+            tn = rec.get("_turn")
+            at = rec.get("at")
+            if isinstance(tn, int) and isinstance(at, str):
+                _turn_at[tn] = at
             if isinstance(rec.get("text"), str):
                 texts.append(rec["text"])
     _recent_texts.extend(texts[-RECENT_WINDOW:])
     if _turn_seq:
-        _log("primed %d dedupe keys from existing %s" % (len(_seen_keys), TURNS_PATH))
+        _log("primed %d dedupe keys, %d turn timestamps from existing %s"
+             % (len(_seen_keys), len(_turn_at), TURNS_PATH))
+
+
+def _fmt_at(at):
+    """ISO 时间戳 -> 'YYYY-MM-DD HH:MM'；不可用返回 ''。"""
+    if not isinstance(at, str) or len(at) < 16:
+        return ""
+    return at[:16].replace("T", " ")
+
+
+def _last_at_for(node):
+    """节点最后活跃时间：source_turns 中最大 turn 对应的采集时间。
+
+    取 max 而非 [-1]，因为 source_turns 不保证有序；
+    若最大 turn 缺 at，向次大退让，直到找到第一条有时间戳的。
+    """
+    st = node.get("source_turns")
+    if isinstance(st, str):
+        try:
+            st = json.loads(st)
+        except json.JSONDecodeError:
+            st = []
+    if not isinstance(st, (list, tuple)):
+        return ""
+    nums = []
+    for t in st:
+        try:
+            nums.append(int(t))
+        except (TypeError, ValueError):
+            pass
+    for t in sorted(set(nums), reverse=True):
+        at = _fmt_at(_turn_at.get(t))
+        if at:
+            return at
+    return ""
 
 
 def _prime_effects():
@@ -336,6 +380,9 @@ def process_turn(payload):
 
     with _lock:
         _received.append(record)
+        # at_last 的原料：本 turn 的采集时间进内存映射（不落盘，state.json 不感知）
+        if isinstance(payload.get("at"), str):
+            _turn_at[turn_no] = payload["at"]
         with open(TURNS_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         _recent_texts.append(text)
@@ -484,6 +531,13 @@ class Handler(BaseHTTPRequestHandler):
             # 半写/损坏也不崩前端：当作「尚未就绪」
             self._json(200, {"ok": True, "state": None})
             return
+        # 附加 at_last：纯响应层派生，只加字段不写回 state.json。
+        # 节点没有可用时间戳时给空串，前端据此不渲染。
+        if isinstance(state, dict) and isinstance(state.get("nodes"), list):
+            with _lock:
+                for node in state["nodes"]:
+                    if isinstance(node, dict) and "at_last" not in node:
+                        node["at_last"] = _last_at_for(node)
         self._json(200, state)
 
     def do_POST(self):
