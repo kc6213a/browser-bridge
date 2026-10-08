@@ -181,6 +181,23 @@
     return nodeEl;
   }
 
+  // 父标题压缩成单行能放下的长度（面板只有 280px 宽）。
+  function shortTitle(s, n) {
+    const t = String(s || '').replace(/\s+/g, ' ').trim();
+    return t.length > n ? t.slice(0, n) + '…' : t;
+  }
+
+  // 行尾追加灰色小字「↳ 属于：<父标题>」；顶层议题不加，布局零变化。
+  // 与 withAt 同款（灰色 11px span），两者可叠加：标题 + 归属 + 时间。
+  function withParent(nodeEl, parentTitle, c) {
+    if (!parentTitle) return nodeEl;
+    nodeEl.appendChild(el('span', {
+      text: '  ↳ ' + shortTitle(parentTitle, 16),
+      style: { color: c.sub, fontSize: '11px' },
+    }));
+    return nodeEl;
+  }
+
   // 按最后活跃时间倒序（最新的在前）。at_last 缺失视为 ''，排到末尾。
   // Array.prototype.sort 在现代 JS 里稳定：时间相同的节点保持 state 原有顺序。
   function sortByLastActive(nodes) {
@@ -203,12 +220,17 @@
   }
 
   // Sprint 7：议题区块。
-  // Sprint 17（议题树 v0.1）：按 parent_id 缩进显示。
-  //   - parent_id 为 null / 指向不存在节点 / 指向自己 -> 顶层，缩进 0
-  //   - 有有效 parent_id -> 缩进一级
+  // Sprint 17（议题树 v0.1）：按 parent_id 表达父子。
+  //   - parent_id 为 null / 指向不存在节点 / 指向自己 -> 顶层
+  //   - 有有效 parent_id -> 子议题
   //   - v0.1 只支持一级（不递归孙节点）、无折叠、无交互、无关联边。
   // 排序：纯按最后活跃时间倒序，直接按此顺序渲染 —— 不再把子节点挪到父节点旁边
-  // （那样会让子议题跟着父议题的时间走，打断时间线）。父子关系只体现在缩进上。
+  // （那样会让子议题跟着父议题的时间走，打断时间线）。
+  //
+  // ⚠️ 2026-10-09（C 修法）：父子关系**不再用缩进表达**，改为行尾标注「↳ 属于：<父标题>」。
+  // 原因：纯时间倒序下缩进会脱离父节点，缩进只说明「我是子节点」却不说「我是谁的子节点」，
+  // 眼睛会把上一行误读成父——已两次现场复现（「指标看板」「任务书收到」两条）。
+  // 位置不表达层级后，归属只能明写，故去掉 `└ ` 前缀与 14px 缩进。
   function renderTopics(state, body, c) {
     body.appendChild(blockTitle('议题', c));
     const all = sortByLastActive((state.nodes || []).filter((n) => n.type === 'topic'));
@@ -226,12 +248,10 @@
     };
 
     for (const t of all) {
-      const isChild = parentOf(t) !== null;
+      const pid = parentOf(t);
+      const pTitle = pid ? (byId[pid].title || '') : '';
       body.appendChild(
-        withAt(row((isChild ? '└ ' : '') + (t.title || ''), c, {
-          paddingLeft: isChild ? '14px' : '0px',
-          color: isChild ? c.sub : c.text,
-        }), t, c)
+        withParent(withAt(row(t.title || '', c), t, c), pTitle, c)
       );
     }
   }
