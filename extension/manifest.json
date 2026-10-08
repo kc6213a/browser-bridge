@@ -32,7 +32,8 @@
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
-        "https://claude.ai/*"
+        "https://claude.ai/*",
+        "https://chat.deepseek.com/*"
       ],
       "js": ["panel.js"],
       "run_at": "document_idle"
