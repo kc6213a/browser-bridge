@@ -36,7 +36,9 @@
   if (!TEST_MODE && !hostOk) return; // 真实站点且不在白名单 -> 不注入
 
   const BASE = (OVERRIDE || 'http://127.0.0.1:8787').replace(/\/+$/, '');
-  const STATE_URL = BASE + '/state';
+  // 按 hostname 分区：server 侧每个 host 一套 state，面板只拿自己所在站点那份。
+  // 「host 是哪个」由浏览器给出，面板不做任何判断/过滤 —— 那是 server 的事。
+  const STATE_URL = BASE + '/state?host=' + encodeURIComponent(location.hostname || '');
   const POLL_MS = 5000;
 
   // ---------------------------------------------------------------
