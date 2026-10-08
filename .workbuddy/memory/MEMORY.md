@@ -112,6 +112,16 @@
     - 隔离实例验证 `/turn` 路由：两个新 host 桶按需创建、各自落盘。
     - commit：bridge `1d918e6`（server）+ `18e2cdd`（panel）。
   ⚠️ 遗留：`s16-accept` 是一次性测试 source 留下的桶（0 节点/2 事件），未清理。
+  ✅ **2026-10-09 02:36 补一刀：清空跨 host 悬空 parent_id**。迁移时「跨 host 边丢弃」只丢了 edges，
+     没清节点上的 `parent_id` 字段 → deepseek 桶 5 个节点的父仍指向 chatgpt 桶。
+     已按「父不在同一个 state 里 → 置 null」清理（deepseek 5 条，chatgpt 0，清理后两桶 dangling 均为 0）。
+     ⚠️ 两条操作教训：① 面板读的是 **bridge 镜像** `received/runtime/hosts/<host>/state.json`，
+        只改 CA 权威文件面板不变，**两边都要改**；② server 把 state 常驻内存、每 turn 回写，
+        **必须先 kill server 再改盘上文件**，否则被内存旧版本覆盖。
+     🔴 **入库口径（凯文拍板）**：`runtime/hosts/` 下的 state 含**真实对话标题，不入库、不推 GitHub**
+        → 已加进 CA `.gitignore`（`runtime/hosts/`、`runtime/migrate_split.py`、`runtime/*.bak_*`、
+        `runtime/_archive_pre_split/`），与既有 `runtime/state.json` 同一口径。
+        **这类「改运行时数据」的任务不产生 commit**，只在 memory 记档。
 - #41（2026-10-08 p1_review 实验，open）：**extractor 抽「内容」不等于抽「议题结构」**。
   现象：陈述级内容（60%=15/25、v1 退役）抽得准；章节级子议题（seq50/seq43/B-1/v2 开工）没成节点。
   根因：当前 schema 只有 assumptions/conclusions/dependencies，缺 topics/subtopics/parent 维度。
