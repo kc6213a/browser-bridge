@@ -35,6 +35,13 @@
       roleFromSelector: true,
       textSelector: ".prose, [data-testid='message-content']",
     },
+    "chat.deepseek.com": {
+      roots: [".ds-message"],
+      roleFromContent: true,
+      assistantSelector: ".ds-markdown, .ds-think-content",
+      textSelector: ".ds-markdown, .ds-think-content",
+      noFallbackToGeneric: true,
+    },
   };
 
   const SOURCE = location.hostname || location.href;
@@ -91,6 +98,9 @@
               typeof el.className === 'string' ? el.className : ''
             );
           }
+        } else if (cfg.roleFromContent) {
+          // DeepSeek 无稳定 role 属性：assistant 消息含 .ds-markdown/.ds-think-content，user 不含
+          role = el.querySelector(cfg.assistantSelector) ? 'assistant' : 'user';
         }
         let node = el;
         if (cfg.textSelector) {
@@ -189,6 +199,10 @@
     const site = cfg ? collectSiteLayer(cfg) : null;
     if (site) {
       return { layer: 1, siteHit: true, selectorUsed: site.selectorUsed, items: site.items };
+    }
+    // Sprint 20：配 noFallbackToGeneric 的站点（DeepSeek）L1 失败不掉 L2，避免重演 Sprint 18 的 137 条失控
+    if (cfg && cfg.noFallbackToGeneric) {
+      return { layer: 0, siteHit: false, selectorUsed: null, items: [] };
     }
     const generic = collectGenericLayer();
     if (generic.items.length) {

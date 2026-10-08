@@ -8,6 +8,7 @@
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://claude.ai/*",
+    "https://chat.deepseek.com/*",
     "http://localhost:8787/*",
     "https://localhost:8787/*",
     "http://127.0.0.1:8787/*"
@@ -21,6 +22,7 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://claude.ai/*",
+        "https://chat.deepseek.com/*",
         "http://localhost/*"
       ],
       "js": ["content.js"],
