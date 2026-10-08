@@ -141,7 +141,28 @@
   依赖：**已有实证（turn 602）** —— 2026-10-09 用户真实对话「现在网页端的 llm 都有类似项目的功能，
     可以把同一项目的对话集…」已落成 topic 节点 → #42 现象侧实证完成。
     （注：若走 ①「project_id 作分区键」，其 DOM 可读取性仍是独立技术探针问题，非本条阻塞。）
-  状态：open，仅记录，不动代码。
+  状态：open（定位问题仍 open）；**① 已于 2026-10-09 落地**——见下「#40-B project 级分区」。
+
+- **#40-B（2026-10-09 凯文任务书，已实现，待真机验）：project/会话 级二级分区**。
+  即在 #40 的 host 分区之下再加一层：路由键 `host + project`。
+  - **先查证的一件事**：`received/turns.jsonl` 每条字段只有
+    `text/role/source/message_id/_turn/_runtime/site_key/layer/selector_used/message_id_source/at`
+    —— **无 URL、无 project** → 历史**无法**按会话回溯分区 → 历史全归 `_no_project`，新数据从今天起分区。
+  - ⚠️ **任务书里的正则对不上真实 URL**（2026-10-09 turn 718 探针实锤）：
+    `chatgpt.com/g/g-p-6ab279ccd1988191b6d08b22a7f31b41-zhi-biao-kan-ban-gai-ban/c/...`
+    hex 后面跟的是**中文拼音 slug**，不是 `/` → `/g/g-p-([a-f0-9]+)/` 匹配不到，必须停在 `-` 上。
+    DeepSeek：`/a/chat/s/<uuid>` → `s-<uuid>`（无项目概念，一个会话=一个容器）。
+  - 实现：`extension/project_id.js`（**共享文件**，content.js 与 panel.js 都调它——
+    两处各写一份正则必漂移，漂移会导致面板请求另一个桶，看起来像串台）；
+    manifest 里必须排在 content.js / panel.js **之前**。
+  - server：`RUNTIMES` 键 `host::project`；路径 `hosts/<host>/<project>/`；`/state?host=&project=`、
+    `/effects?host=&project=`；`/health` 的 hosts 汇总改为按 bucket key 列。
+  - 面板：header 灰色小字显示当前会话短标签；若 server 回的桶 ≠ 请求的桶，追加 `⚠ 桶=xxx`。
+  - 迁移：`Conversation Agent/runtime/migrate_project.py`（不进 git，先备份到 `_archive_pre_project/`），
+    3 个 host 桶全部搬进 `_no_project/`，节点守恒（42 / 31 / 0）。
+  - 冒烟（一次性 source `smoke-project`，已清理）：两个不同 project_id 各发一条 →
+    落成两个独立目录，各 1 事件 1 节点，互不相干。
+  - 红线遵守情况：未碰 event_judge / state_updater / event_store；跨 project 边不合并（本就 0）。
 - #43（2026-10-09 诊断，**fixed 本次**）：**L1 `querySelector` 只取第一个匹配块，DeepSeek 只抓到 thinking**。
   根因：`content.js` collectSiteLayer 用 `el.querySelector(cfg.textSelector)`（**单数**），
   遇逗号选择器只返回 DOM 序第一个；DeepSeek 先渲染 `.ds-think-content`（思考）后渲染 `.ds-markdown`
