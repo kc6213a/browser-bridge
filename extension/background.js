@@ -36,6 +36,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         message_id: msg.message_id || null,
         message_id_source: msg.message_id_source || null,
         at: msg.at || new Date().toISOString(),
+        project_id: msg.project_id || null,
       };
 
   forward(route, body).then((server) => sendResponse({ ok: !!(server && server.ok), server }));
