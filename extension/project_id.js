@@ -20,7 +20,6 @@
  */
 (() => {
   'use strict';
-  console.log('[bridge] project_id.js loaded:', location.href);
 
   const PROJECT_PATTERNS = [
     { host: 'chatgpt.com', re: /\/g\/(g-p-[0-9a-f]{8,})/i },
@@ -58,5 +57,4 @@
 
   window.__BRIDGE_PROJECT_ID__ = bridgeProjectId;
   window.__BRIDGE_PROJECT_LABEL__ = bridgeProjectLabel;
-  console.log('[bridge] project_id value:', window.__BRIDGE_PROJECT_ID__());
 })();

@@ -346,7 +346,6 @@
       if (seen.has(it.el)) continue;
       seen.add(it.el);
       sentIds.add(it.message_id);
-      console.log('[bridge] posting project_id:', projectId());
       post('turn', {
         type: 'BRIDGE_TURN',
         source: SOURCE,
