@@ -341,10 +341,15 @@ def _prime_from_disk():
 
 
 def _fmt_at(at):
-    """ISO 时间戳 -> 'YYYY-MM-DD HH:MM'；不可用返回 ''。"""
+    """ISO 8601 UTC -> 本地时区 'YYYY-MM-DD HH:MM'；不可用返回 ''。"""
     if not isinstance(at, str) or len(at) < 16:
         return ""
-    return at[:16].replace("T", " ")
+    try:
+        dt = datetime.fromisoformat(at.replace("Z", "+00:00"))
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        # 解析失败回退到原行为，不崩
+        return at[:16].replace("T", " ")
 
 
 def _last_at_for(node):
