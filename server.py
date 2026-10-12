@@ -65,7 +65,7 @@ BRIDGE_EFFECTS_PATH = os.path.join(RUNTIME_DIR, "effects.jsonl")
 _lock = threading.Lock()
 _received = []
 _recent_texts = []
-_seen_keys = set()
+_seen_keys = dict()   # key: (host:str, project:str) -> value: set[str]  (#50 二级分区去重)
 _turn_seq = 0
 _diag_count = 0
 
@@ -126,6 +126,16 @@ def _safe_project(raw):
     for ch in s:
         out.append(ch if (ch.isalnum() or ch in "._-") else "_")
     return "".join(out) or DEFAULT_PROJECT
+
+
+def _is_reserved_project(p):
+    """保留桶：以下划线开头但**不是**当前兜底桶 `_no_project` 的项目 id，
+    视为「历史/隐藏」桶，不出现在面板项目列表、也不经 URL 直接打开。
+
+    约定：迁移前的混合数据统一归档为 `_legacy_no_project`；
+    任何未来以下划线开头（非 `_no_project`）的桶都按保留处理，避免被误列成项目。
+    """
+    return bool(p) and p != DEFAULT_PROJECT and p.startswith("_")
 
 
 def _bucket_key(host, project):
@@ -255,14 +265,18 @@ def init_host_runtime(host, project=None):
 
 def get_runtime(host, project=None):
     """按需建桶（不在锁内调用 persist，避免死锁）。"""
-    key = _bucket_key(host, project)
+    proj = project or DEFAULT_PROJECT
+    if _is_reserved_project(proj):
+        # 保留桶不可经运行时直接打开：退回当前兜底桶，历史数据保持只读
+        proj = DEFAULT_PROJECT
+    key = _bucket_key(host, proj)
     bucket = RUNTIMES.get(key)
     if bucket is not None:
         return bucket
     with _lock:
         bucket = RUNTIMES.get(key)
         if bucket is None:
-            bucket = init_host_runtime(host, project)
+            bucket = init_host_runtime(host, proj)
     return bucket
 
 
@@ -281,7 +295,8 @@ def _prime_known_hosts():
             if not os.path.isdir(hp):
                 continue
             subs = [s for s in sorted(os.listdir(hp))
-                    if os.path.isdir(os.path.join(hp, s))]
+                    if os.path.isdir(os.path.join(hp, s))
+                    and not _is_reserved_project(s)]
             if subs:
                 for s in subs:
                     buckets.add((name, s))
@@ -301,7 +316,9 @@ def _prime_known_hosts():
 # 去重键
 # ------------------------------------------------------------------
 
-def _dedupe_key(payload):
+def _dedupe_key(payload, host=None, project=None):
+    # host/project 入参仅用于选择外层分桶（见 _prime_from_disk / process_turn），
+    # 内层键字符串形态保持 "id:..." / "hash:..." 不变 —— 去重键字符串零改动，回归闸门。
     mid = payload.get("message_id")
     if isinstance(mid, str) and mid.strip():
         return "id:" + mid.strip()
@@ -325,7 +342,11 @@ def _prime_from_disk():
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            _seen_keys.add(_dedupe_key(rec))
+            # #50：历史 turn 按 (host, project or '_no_project') 分桶，跨项目不再共享去重。
+            # pre-#40-B 的 project_id=None -> _safe_project -> '_no_project' 桶，与运行时未分区桶口径一致。
+            host = _safe_host(rec.get("host") or rec.get("source") or "unknown")
+            project = _safe_project(rec.get("project_id"))
+            _seen_keys.setdefault((host, project), set()).add(_dedupe_key(rec, host, project))
             _turn_seq += 1
             # at_last 的原料：turn -> 采集时间
             tn = rec.get("_turn")
@@ -336,8 +357,9 @@ def _prime_from_disk():
                 texts.append(rec["text"])
     _recent_texts.extend(texts[-RECENT_WINDOW:])
     if _turn_seq:
-        _log("primed %d dedupe keys, %d turn timestamps from existing %s"
-             % (len(_seen_keys), len(_turn_at), TURNS_PATH))
+        total_keys = sum(len(s) for s in _seen_keys.values())
+        _log("primed %d dedupe keys across %d buckets, %d turn timestamps from existing %s"
+             % (total_keys, len(_seen_keys), len(_turn_at), TURNS_PATH))
 
 
 def _fmt_at(at):
@@ -465,10 +487,12 @@ def process_turn(payload):
     # 2026-10-09：第二级分区键。老客户端不带 project_id -> 自动落 _no_project 兜底桶。
     project = _safe_project(payload.get("project_id"))
 
-    key = _dedupe_key(payload)
+    bucket = (host, project)
+    key = _dedupe_key(payload, host, project)
     with _lock:
-        if key in _seen_keys:
-            _log("TURN DUP  skipped message_id=%s source=%s key=%s" % (mid, mid_source, key))
+        bset = _seen_keys.setdefault(bucket, set())
+        if key in bset:
+            _log("TURN DUP  bucket=%s skipped message_id=%s source=%s key=%s" % (bucket, mid, mid_source, key))
             return {
                 "ok": True,
                 "duplicate": True,
@@ -476,7 +500,7 @@ def process_turn(payload):
                 "runtime_status": "skipped_duplicate",
                 "message_id": mid,
             }
-        _seen_keys.add(key)
+        bset.add(key)
         _turn_seq += 1
         turn_no = _turn_seq
         recent = list(_recent_texts[-RECENT_WINDOW:])
@@ -617,7 +641,7 @@ class Handler(BaseHTTPRequestHandler):
                 "turns": len(_received),
                 "diagnoses": _diag_count,
                 "recv_dir": RECV_DIR,
-                "dedupe_keys": len(_seen_keys),
+                "dedupe_keys": sum(len(s) for s in _seen_keys.values()),
                 "effects": len(_effects_cache),
                 "runtime": {
                     "home": AGENT_HOME,
@@ -712,6 +736,10 @@ class Handler(BaseHTTPRequestHandler):
         host = _safe_host(host_raw)
         proj_raw = (query.get("project") or [""])[0]
         project = _safe_project(proj_raw)
+        if _is_reserved_project(project):
+            # 保留桶不对外暴露：当作「尚无数据」返回，避免误列历史
+            self._json(200, dict({"ok": True, "state": None}, host=host, project=project))
+            return
         state_path = _host_paths(host, project)["bridge_state"]
         meta = {"host": host, "project": project}
         if not os.path.exists(state_path):
