@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh" data-bridge-site="chat.deepseek.com">
+<head>
+<meta charset="utf-8">
+<title>L4 e2e · DeepSeek 虚拟滚动模拟页</title>
+<style>
+  html, body { margin: 0; height: 100%; font-family: sans-serif; }
+  /* 关键：容器 style 带 --dsl-virtual-list-* 标记（DeepSeek 实测签名），
+     content.js 的 findVirtualScroller() 靠这个定位。 */
+  #scroller {
+    --dsl-virtual-list-transform-y: 0px;
+    --dsl-virtual-list-item-height: 200px;
+    height: 400px;           /* clientHeight */
+    overflow-y: auto;
+    position: relative;
+    border: 1px solid #ccc;
+  }
+  #spacer { height: 8000px; position: relative; }   /* 40 条 × 200px */
+  .ds-message { height: 200px; box-sizing: border-box; padding: 12px; border-bottom: 1px solid #eee; }
+  .ds-message .md { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="scroller"><div id="spacer"></div></div>
+
+<script>
+  // 虚拟滚动模拟：只把「视口内」的消息渲染进 DOM，滚动走过即销毁。
+  // 这正是 DeepSeek dsl-virtual-list 的行为，也是 #44/#46 的根因形态。
+  var TOTAL = 40, ITEM_H = 200;
+  var scroller = document.getElementById('scroller');
+  var spacer = document.getElementById('spacer');
+
+  function render() {
+    var top = scroller.scrollTop;
+    var start = Math.max(0, Math.floor(top / ITEM_H) - 1);
+    var end = Math.min(TOTAL, Math.ceil((top + scroller.clientHeight) / ITEM_H) + 1);
+    spacer.innerHTML = '';
+    for (var i = start; i < end; i++) {
+      var d = document.createElement('div');
+      d.className = 'ds-message';
+      // 真实 DeepSeek 里这个变量挂在消息内部容器上；这里挂在消息节点上等价
+      d.setAttribute('style', '--dsl-virtual-list-transform-y: ' + top + 'px');
+      if (i % 2 === 1) {
+        // 奇数 = assistant：含 .ds-markdown（roleFromContent 判 assistant 的依据）
+        var md = document.createElement('div');
+        md.className = 'ds-assistant-message-1 ds-markdown md';
+        md.textContent = 'MSG-' + i + ' assistant body ' + new Array(40).join('y');
+        d.appendChild(md);
+      } else {
+        // 偶数 = user：纯文本，无 markdown 子节点
+        d.textContent = 'MSG-' + i + ' user body ' + new Array(40).join('x');
+      }
+      spacer.appendChild(d);
+    }
+  }
+  scroller.addEventListener('scroll', render);
+  render();
+</script>
+</body>
+</html>

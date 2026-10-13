@@ -1,10 +1,11 @@
 /**
- * Browser Bridge content script (v0.2)
+ * Browser Bridge content script (v0.4)
  *
- * 三层结构：
+ * 四层结构：
  *   [L1] 站点专用选择器  —— 已知稳定属性（data-message-author-role / data-testid 等）
  *   [L2] 通用启发式      —— 站点专用全部落空时的兜底：div/article + 长度过滤 + 交替角色
  *   [L3] 自诊断          —— 每次扫描都把「命中了哪层、用了哪个选择器、抓到什么」POST 回本地
+ *   [L4] 虚拟滚动全量扫描 —— #44/#46：分步下滚累积采集，解决「DOM 只有视口内消息」
  *
  * 设计原则：不猜未知站点的 DOM，改版失效时让扩展自己把新 DOM 结构报回来（第三层）。
  * 用户全程不需要 F12。
@@ -260,6 +261,19 @@
       layer: result.layer,
       selector_used: result.selectorUsed,
       message_count: result.items.length,
+      // #44/#46：让缺口可见。虚拟滚动下 DOM 条数 < 会话真实条数，
+      // 上报容器滚动指标即可判断"是不是只收了视口内那几条"。
+      virtual_list: (function () {
+        const s = findVirtualScroller();
+        if (!s) return null;
+        try {
+          return {
+            scrollHeight: s.scrollHeight,
+            clientHeight: s.clientHeight,
+            scrollTop: s.scrollTop,
+          };
+        } catch (e) { return null; }
+      })(),
       message_id_source: srcKeys.length ? srcKeys.join('+') : 'none',
       message_id_sources: srcCount,
       sample_message_ids: result.items.slice(0, 5).map((x) => x.message_id || null),
@@ -394,6 +408,121 @@
     }
   });
 
+  // ---------------------------------------------------------------
+  // [L4] 虚拟滚动全量扫描（#44/#46 · 2026-10-13 冻结方案 A）
+  //
+  // 背景：DeepSeek 消息列表是 `dsl-virtual-list` 虚拟滚动容器，DOM 里只保留
+  // 视口内的消息节点（滚动走过即销毁）。原有采集完全被动（boot 一次 +
+  // MutationObserver），页面打开若不手动滚到底，历史消息永不进 DOM。
+  //
+  // 做法：分步下滚 → 每步立即采集（累积进 sentIds）→ 连续 3 轮条数不变即停 →
+  // 恢复原 scrollTop。**必须分步累积**：虚拟滚动下"滚到底再抓"只能拿到最终
+  // 视口，中间段落已被回收。
+  //
+  // 协调（凯文 2026-10-13 指出）：fullScan 自己调 run()，而滚动又会触发
+  // MutationObserver → schedule() → 又一个 run()。两条采集路径并行会互相
+  // 重置 debounce 时序、重复抓同一批节点、并破坏"每步等渲染再抓"的假设。
+  // 故 fullScan 期间 observer.disconnect()，finally 里原样重新 observe。
+  // disconnect + re-observe 不改变观察配置，观察层语义零改动。
+  //
+  // 兜底：找不到虚拟列表标记（如 ChatGPT）→ 直接 no-op，行为与改前完全一致。
+  // ---------------------------------------------------------------
+  const FULLSCAN_STEP_MS = 300;        // 每步等待虚拟列表渲染的时间
+  const FULLSCAN_MAX_STEPS = 120;      // 步数上限，防长会话跑飞
+  const FULLSCAN_STABLE_ROUNDS = 3;    // 连续 N 轮条数不变视为到底
+  const FULLSCAN_BOOT_DELAY_MS = 1500; // boot 后延迟多久启动（等页面稳定）
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // 找虚拟滚动容器：按 --dsl-virtual-list-* 自定义属性定位（DeepSeek 实测签名），
+  // 再从标记元素向上找第一个可滚动祖先。找不到 → null（非虚拟滚动站点走这里）。
+  function findVirtualScroller() {
+    let marker = null;
+    try {
+      marker = document.querySelector('[style*="--dsl-virtual-list"]');
+    } catch (e) {
+      return null;  // 选择器不被支持等情况，安全退化为"不扫"
+    }
+    if (!marker) return null;
+    let node = marker;
+    while (node && node !== document.documentElement) {
+      try {
+        if (node.scrollHeight > node.clientHeight + 16) return node;
+      } catch (e) { /* ignore */ }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  let observerPaused = false;
+  function pauseObserver() {
+    if (observerPaused) return;
+    try { observer.disconnect(); } catch (e) { /* ignore */ }
+    observerPaused = true;
+  }
+  function resumeObserver() {
+    if (!observerPaused) return;
+    try {
+      observer.observe(document.documentElement || document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    } catch (e) { /* ignore */ }
+    observerPaused = false;
+  }
+
+  async function fullScan(opts) {
+    const restore = !opts || opts.restore !== false;
+    const scroller = findVirtualScroller();
+    if (!scroller) return { ran: false, reason: 'no-virtual-list' };
+
+    const originTop = scroller.scrollTop;
+    const counts = [];
+    let lastTop = -1;
+    let stable = 0;
+
+    pauseObserver();
+    try {
+      for (let i = 0; i < FULLSCAN_MAX_STEPS && stable < FULLSCAN_STABLE_ROUNDS; i++) {
+        let top = 0;
+        try {
+          scroller.scrollTop = scroller.scrollTop +
+            Math.max(1, Math.round(scroller.clientHeight * 0.8));
+          top = scroller.scrollTop;
+        } catch (e) { break; }
+        await sleep(FULLSCAN_STEP_MS);
+        counts.push(run().items.length);   // 每步立即采集，累积去重
+        // 终止判据 = scrollTop 不再增长（已滚到底），**不能用消息条数**：
+        // 虚拟列表的 DOM 条数本来就该是恒定的（那是虚拟化的意义），
+        // 用条数判"稳定"会在第 2 步就误判到底。（e2e 实测抓到的设计缺陷）
+        if (top === lastTop) stable++;
+        else stable = 0;
+        lastTop = top;
+      }
+    } finally {
+      resumeObserver();                    // 异常也不能漏恢复，否则采集永久失效
+      if (restore) {
+        try { scroller.scrollTop = originTop; } catch (e) { /* ignore */ }
+      }
+      run();                               // 补跑：收暂停期间产生的新消息
+    }
+    return { ran: true, steps: counts.length, counts, finalCount: counts[counts.length - 1] };
+  }
+
+  // 手动入口（兜底）：控制台执行 __bridgeFullScan() 可随时重扫
+  window.__bridgeFullScan = function () {
+    return fullScan({ restore: true }).then((r) => {
+      console.log('[browser-bridge] fullScan -> ' + JSON.stringify(r));
+      return r;
+    }).catch((e) => {
+      console.warn('[browser-bridge] fullScan error: ' + e);
+      throw e;
+    });
+  };
+
   function boot() {
     try {
       observer.observe(document.documentElement || document.body, {
@@ -410,6 +539,18 @@
     console.log('[browser-bridge] ready on ' + SOURCE +
       ' layer=' + r.layer + ' count=' + r.items.length +
       ' selector=' + r.selectorUsed);
+
+    // #44/#46：boot 后自动做一次全量扫描（手动会忘）。非虚拟滚动站点 no-op。
+    setTimeout(() => {
+      fullScan({ restore: true }).then((res) => {
+        if (res.ran) {
+          console.log('[browser-bridge] fullScan done steps=' + res.steps +
+            ' final=' + res.finalCount + ' counts=' + JSON.stringify(res.counts));
+        }
+      }).catch((e) => {
+        console.warn('[browser-bridge] fullScan failed: ' + e);
+      });
+    }, FULLSCAN_BOOT_DELAY_MS);
   }
 
   if (document.readyState === 'loading') {

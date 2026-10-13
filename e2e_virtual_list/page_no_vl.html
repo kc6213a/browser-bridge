@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh" data-bridge-site="chatgpt.com">
+<head>
+<meta charset="utf-8">
+<title>L4 e2e · 非虚拟滚动对照页（ChatGPT 形态）</title>
+<style>
+  html, body { margin: 0; font-family: sans-serif; }
+  #list { padding: 12px; }
+  .msg { padding: 8px; border-bottom: 1px solid #eee; }
+</style>
+</head>
+<body>
+<!-- ChatGPT 形态：全部消息一次性在 DOM 里，无 --dsl-virtual-list 标记 -->
+<div id="list">
+  <div class="msg" data-message-author-role="user">CG-0 user body aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</div>
+  <div class="msg" data-message-author-role="assistant">CG-1 assistant body bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</div>
+  <div class="msg" data-message-author-role="user">CG-2 user body cccccccccccccccccccccccccccccc</div>
+  <div class="msg" data-message-author-role="assistant">CG-3 assistant body dddddddddddddddddddddddddddddd</div>
+</div>
+</body>
+</html>
