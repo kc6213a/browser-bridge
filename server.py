@@ -30,6 +30,14 @@ browser-bridge 本地接收端 (v0.4 / Sprint 1)
     BRIDGE_PORT              默认 8787
     BRIDGE_RECV_DIR          默认 <base>/received
     BRIDGE_LLM               real（默认，打真模型）| none（不调模型，Runtime 仍被调用）
+    BRIDGE_SSE_REFLOW        1=把 SSE 抓到的 ChatGPT 消息回流进 CA 推理层；
+                             **0（默认）= 只落盘 received_sse/，不进 CA、不产事件**。
+                             默认关是省钱默认态，不是故障；防断流靠 /health 显式告警。
+    OPENAI_MODEL            默认 deepseek-chat（由 runtime/llm_adapter 读取）。
+                             启动时必跑漂移探针：不在 /models 列表、或响应体 model 字段
+                             与配置不一致 -> /health 的 model_drift_warning 标黄。
+
+⚠️ 运行期状态请先看项目根 README.md 的「当前状态」一节（ChatGPT 默认不分析那条）。
 """
 import hashlib
 import json
@@ -38,6 +46,8 @@ import queue
 import sys
 import threading
 import uuid
+import urllib.error
+import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -118,6 +128,18 @@ SSE_REFLOW_SKIP_ROLES = {"system", "tool"}
 _sse_reflow_q = queue.Queue()   # 异步：LLM 判定慢，不能在 _sse 持锁路径里同步跑
 _sse_reflow_fails = 0           # worker 连续失败计数（成功即清零）
 REFLOW_PENDING_PATH = os.path.join(SSE_DIR, "reflow_pending.jsonl")
+
+# ---- 模型漂移探针（2026-10-28 凯文拍定：**必做**，不是可选项）----
+# 起因（真实事故）：配置写 deepseek-chat，服务端静默别名到 deepseek-flash —— 请求返回 200、
+# 响应体里的 model 字段被悄悄换掉，代码与日志毫无察觉，判定分布等于换了个模型没人知道。
+# 凯文原话：「用户接受 flash 是接受『现在这个 flash』，不是接受静默漂移。」
+# 所以启动时**必须**核两件事，任一不符 -> /health 标黄（model_drift_warning）+ 启动日志警告块：
+#   ① GET {base_url}/models：配置模型是否还在可用列表里（不在 = 已下架/改名，漂移前兆）
+#   ② 打一次最小 chat/completions（max_tokens=1，成本≈几分钱）：响应体 model 字段 == 配置模型？
+# 探针跑不完（网络错 / 402 欠费）也算异常 —— 「没验上」不等于「没问题」，同样标黄。
+# ⚠️ 只观测、不熔断、不改模型、不阻断启动：改模型 = 换判定器，必须人来拍（硬常识）。
+MODEL_PROBE_TIMEOUT = float(os.environ.get("BRIDGE_MODEL_PROBE_TIMEOUT", "20"))
+MODEL_DRIFT = {}    # 探针结果（空 dict = 未跑，如 BRIDGE_LLM=none）
 
 _effects_cache = []      # GET /effects 的内存视图（启动时从 effects.jsonl 灌回）
 _effect_seq = 0          # 单调递增 effect id；跨重启续编号
@@ -222,6 +244,141 @@ def _stdout(msg):
     """黑窗口 + 日志双写。"""
     print(msg, flush=True)
     _log(msg)
+
+
+def _load_dotenv(path=None):
+    """极简 .env 加载（无第三方依赖）：只补**当前环境里没有**的变量，不覆盖已 export 的值。
+
+    .env 只放非敏感配置（如 OPENAI_MODEL）；密钥一律留在系统环境变量或 .env.local（不入库）。
+    必须在 init_runtime() 之前调用 —— default_llm() 构造时才读 OPENAI_MODEL。
+    """
+    env_path = path or os.path.join(BASE_DIR, ".env")
+    if not os.path.isfile(env_path):
+        return {}
+    loaded = {}
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip("'\"")
+                if not k or k in os.environ:
+                    continue        # 已 export 的优先，.env 只是缺省值
+                os.environ[k] = v
+                loaded[k] = v
+    except Exception as e:
+        _log("DOTENV read failed (%s: %s) file=%s" % (type(e).__name__, e, env_path))
+        return {}
+    if loaded:
+        _log("DOTENV loaded %s from %s" % (json.dumps(loaded, ensure_ascii=False), env_path))
+    return loaded
+
+
+# ------------------------------------------------------------------
+# 启动模型漂移探针（必做：见上方 MODEL_PROBE_TIMEOUT 处的说明）
+# ------------------------------------------------------------------
+
+def _probe_model_drift(llm):
+    """启动核模型一致性。只观测：不改写 llm、不熔断、不阻断启动。
+
+    返回 dict（空 dict = 本进程没有真模型，无需核）。
+    """
+    if llm is None:
+        return {}
+
+    info = {
+        "configured_model": getattr(llm, "model", None),
+        "base_url": getattr(llm, "base_url", None),
+        "listed": None,            # 配置模型是否在 /models 列表里
+        "available_models": None,  # /models 返回的 id 列表
+        "actual_model": None,      # 最小调用实测返回的 model 字段
+        "match": None,             # actual_model == configured_model
+        "error": None,             # 探针自身没跑完的原因
+        "warning": None,           # 非空 = /health 标黄
+    }
+    headers = {
+        "Authorization": "Bearer %s" % getattr(llm, "api_key", ""),
+        "Content-Type": "application/json",
+    }
+    errs = []
+
+    # ① 可用模型列表：配置模型还在不在？
+    try:
+        req = urllib.request.Request(
+            llm.base_url + "/models", headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=MODEL_PROBE_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict)]
+        info["available_models"] = ids
+        info["listed"] = llm.model in ids
+    except Exception as e:
+        errs.append("GET /models 失败（%s: %s）" % (type(e).__name__, e))
+
+    # ② 最小真实调用：服务端到底用哪个模型答的（max_tokens=1，成本可忽略）
+    try:
+        body = json.dumps({
+            "model": llm.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "temperature": 0.0,
+            "stream": False,
+        }, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            llm.base_url + "/chat/completions",
+            data=body, method="POST", headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=MODEL_PROBE_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        info["actual_model"] = data.get("model")
+        info["match"] = (info["actual_model"] == llm.model)
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            detail = ""
+        errs.append("探针调用 HTTP %s（%s）" % (e.code, detail))
+    except Exception as e:
+        errs.append("探针调用失败（%s: %s）" % (type(e).__name__, e))
+
+    reasons = []
+    if info["listed"] is False:
+        reasons.append("配置模型 %r 不在 /models 列表 %s 里"
+                       % (llm.model, info["available_models"]))
+    if info["match"] is False:
+        reasons.append("静默别名：请求 %r、服务端实际用 %r 回答"
+                       % (llm.model, info["actual_model"]))
+    if errs:
+        info["error"] = " | ".join(errs)
+        reasons.append("探针没跑完，无法确认一致性：%s" % info["error"])
+    if reasons:
+        info["warning"] = "；".join(reasons)
+    return info
+
+
+def _report_model_drift():
+    """把探针结果打到黑窗口 + 日志；异常时用星号块（与回流关闭告警同一视觉等级）。"""
+    if not MODEL_DRIFT:
+        _log("MODEL_PROBE skipped（llm=%s，无真模型可核）" % LLM_MODE)
+        return
+    if MODEL_DRIFT.get("warning"):
+        _stdout("*" * 72)
+        _stdout("*** WARNING: MODEL DRIFT（模型漂移）—— 判定结果可能与历史不可比")
+        _stdout("***   配置模型    : %s" % MODEL_DRIFT.get("configured_model"))
+        _stdout("***   实际返回    : %s" % MODEL_DRIFT.get("actual_model"))
+        _stdout("***   /models 列表 : %s" % MODEL_DRIFT.get("available_models"))
+        _stdout("***   原因        : %s" % MODEL_DRIFT.get("warning"))
+        _stdout("***   后果        : 换模型 = 换判定器，NEW_TOPIC/ASSUMPTION 分布不可比")
+        _stdout("***   处置        : 把 OPENAI_MODEL 改成实际模型以消除告警，")
+        _stdout("***                或明确接受当前实际模型（接受的是它，不是静默漂移）")
+        _stdout("*" * 72)
+        _log("MODEL_DRIFT_WARNING " + json.dumps(MODEL_DRIFT, ensure_ascii=False))
+    else:
+        _stdout("model probe ok: configured=%s listed=True actual=%s"
+                % (MODEL_DRIFT.get("configured_model"),
+                   MODEL_DRIFT.get("actual_model")))
+        _log("MODEL_PROBE_OK " + json.dumps(MODEL_DRIFT, ensure_ascii=False))
 
 
 # ------------------------------------------------------------------
@@ -961,6 +1118,10 @@ class Handler(BaseHTTPRequestHandler):
                     "启用请重启并设 BRIDGE_SSE_REFLOW=1"
                     + ("（本次为自动熔断：%s）" % _sse_reflow_disabled_reason
                        if _sse_reflow_disabled_reason else "（默认关闭）"))),
+                # 模型漂移探针（启动必做）：**只有告警时才占版面**——绿灯时 model_drift 为 null、
+                # model_drift_warning 为 null（凯文拍定：常亮的黄警等于没告警，探针要能沉默）。
+                "model_drift": (MODEL_DRIFT if MODEL_DRIFT.get("warning") else None),
+                "model_drift_warning": MODEL_DRIFT.get("warning"),
                 "turns": len(_received),
                 "diagnoses": _diag_count,
                 "recv_dir": RECV_DIR,
@@ -1339,7 +1500,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global MODEL_DRIFT
+    _load_dotenv()          # 读 <项目根>/.env（非敏感缺省值），必须在 init_runtime 之前
     init_runtime()
+    MODEL_DRIFT = _probe_model_drift(RUNTIME.get("llm"))
+    _report_model_drift()
     _prime_known_hosts()
     _prime_from_disk()
     _prime_effects()
