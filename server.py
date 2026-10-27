@@ -37,6 +37,7 @@ import os
 import queue
 import sys
 import threading
+import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -90,16 +91,31 @@ SSE_FRESH_WINDOW_SEC = 300  # 秒：createTime / last_turn_at 距现在的"新�
 # 回流 = 把 SSE 抓到的消息补差后转成 /turn payload，交给 process_turn（同一条链路：
 # 去重走 _dedupe_key + _seen_keys[(host,project)]，判定走 rt.on_turn，落盘走 persist）。
 # 走 process_turn 而非直接写 turns.jsonl：后者只是原始落盘、不产事件（NEW_TOPIC 等）。
-SSE_REFLOW_ENABLED = os.environ.get("BRIDGE_SSE_REFLOW", "0") != "0"
-# 单次回流上限（2026-10-28 凯文拍定）：#52 DeepSeek 欠费(HTTP 402)未解决，而打开一个长会话
-# 的 history 全量补差可能上百条、每条一次 LLM 判定 -> 瞬间几百次失败请求，还会灌爆日志。
-# 超过上限时只回流「最近」的 N 条（服务端数组按时间升序，取末尾），其余标 skipped_too_many。
-# 默认值是安全阀，不是业务口径；要全量回流就把上限调大。
+# 默认开（2026-10-28 复核 #52 后改）：DeepSeek 余额已恢复（实测 /user/balance HTTP 200,
+# is_available=true, total_balance=12.81 CNY），且实测 62 条消息 101 次判定全部 runtime=ok。
+# 仍可用 env BRIDGE_SSE_REFLOW=0 手动关。
+# 运行期的兜底是「连续失败熔断」（见 SSE_REFLOW_FAIL_LIMIT）——欠费复发时自动停，不灌 402。
+SSE_REFLOW_ENABLED = os.environ.get("BRIDGE_SSE_REFLOW", "1") != "0"
+# 旧会话确认闸门（2026-10-28 凯文拍定）：单次补差消息数 <= 本值 -> 自动回流（新/短会话，零摩擦）；
+# 超过 -> **不自动回流**，落 received_sse/reflow_pending.jsonl 待确认，避免打开一个长历史会话
+# 就瞬间烧掉上百次 LLM 判定。确认后仍受 MAX_PER_BATCH 硬上限约束。
+SSE_REFLOW_AUTO_MAX = int(os.environ.get("BRIDGE_SSE_REFLOW_AUTO_MAX", "20"))
+# 连续 LLM 失败熔断：worker 连续 N 次判定失败（典型=HTTP 402 欠费/网络错）就自动关闭回流并告警，
+# 防止欠费复发时把队列里剩下的全打一遍 402、灌爆日志。置 0 可禁用熔断。
+SSE_REFLOW_FAIL_LIMIT = int(os.environ.get("BRIDGE_SSE_REFLOW_FAIL_LIMIT", "3"))
+# 预估判定次数用的经验系数：2026-10-28 实测 62 条消息 -> 101 次 LLM 调用（1.63 次/条）。
+# 一条消息可能同时产出 NEW_TOPIC / ASSUMPTION_INTRODUCED 等多个候选，各调一次。
+# 仅用于「预估」展示给用户做确认决策，不参与任何判定逻辑。
+SSE_REFLOW_CALL_RATIO = 1.63
+# 单次回流上限（2026-10-28 凯文拍定）：即便用户已确认，也只回流「最近」的 N 条，
+# 更早的标 skipped_too_many。默认值是安全阀，不是业务口径；要全量回流就把上限调大。
 SSE_REFLOW_MAX_PER_BATCH = 50
 # system：基本是空消息（text=''），喂进去只是白烧一次 LLM 判定 -> 滤。
-# tool：占约 16.7%，是工具调用结果；暂按"噪音"滤掉，确认有信息价值后从本集合移除即可放开。
+# tool：占约 16.7%，是 AI 调函数的执行结果、不是用户认知；判断/结论里不该有（凯文拍定保持过滤）。
 SSE_REFLOW_SKIP_ROLES = {"system", "tool"}
 _sse_reflow_q = queue.Queue()   # 异步：LLM 判定慢，不能在 _sse 持锁路径里同步跑
+_sse_reflow_fails = 0           # worker 连续失败计数（成功即清零）
+REFLOW_PENDING_PATH = os.path.join(SSE_DIR, "reflow_pending.jsonl")
 
 _effects_cache = []      # GET /effects 的内存视图（启动时从 effects.jsonl 灌回）
 _effect_seq = 0          # 单调递增 effect id；跨重启续编号
@@ -625,19 +641,12 @@ def process_turn(payload):
     }
 
 
-def _sse_enqueue_reflow(msgs, host, project):
-    """把 SSE 抓到的新消息（已按 message.id 补差）转成 /turn payload 入回流队列。
+def _sse_reflow_candidates(msgs, stat):
+    """从 SSE 消息里挑出「值得回流」的候选，按 createTime 升序稳定排序。
 
-    只入队、不阻塞：真正的 process_turn（含 LLM 判定）由后台 worker 串行消费。
-    **顺序保证**：queue.Queue 是 FIFO，且只有一个 consumer 线程 —— 入队顺序即
-    msgs 数组顺序，process_turn 也就按同一顺序串行执行，turn_no 单调递增，
-    历史消息不会乱序入库（服务端数组本身按时间升序，S4 已验）。
-    返回统计 dict：{enqueued, skipped_roles, skipped_too_many}。
+    抽出来给闸门与入队共用：闸门要先知道条数才能决定「自动 or 待确认」。
+    返回 [(role, text, message_id, createTime|None), ...]（**未**应用上限，由调用方裁）。
     """
-    stat = {"enqueued": 0, "skipped_roles": 0, "skipped_too_many": 0}
-    if not SSE_REFLOW_ENABLED or not host:
-        return stat
-
     cands = []
     for m in msgs:
         if not isinstance(m, dict):
@@ -666,12 +675,14 @@ def _sse_enqueue_reflow(msgs, host, project):
             stat["reordered"] = True            # 排序确实改变了顺序，留痕便于验收
     else:
         stat["sorted_by_create_time"] = False
+    return cands
 
-    # 上限保护：只回流最近的 N 条，更早的弃掉（不烧 LLM）
+
+def _sse_reflow_put(cands, host, project, stat):
+    """把候选裁到上限后入队（内部用）。"""
     if len(cands) > SSE_REFLOW_MAX_PER_BATCH:
         stat["skipped_too_many"] = len(cands) - SSE_REFLOW_MAX_PER_BATCH
         cands = cands[-SSE_REFLOW_MAX_PER_BATCH:]
-
     for role, text, mid, _ct in cands:
         _sse_reflow_q.put({
             "text": text,
@@ -683,24 +694,176 @@ def _sse_enqueue_reflow(msgs, host, project):
             "layer": "sse",
         })
         stat["enqueued"] += 1
-
-    if stat["enqueued"] or stat["skipped_too_many"]:
-        _log("SSE_REFLOW enqueue=%d skipped_roles=%d skipped_too_many=%d host=%s project=%s pending=%d"
-             % (stat["enqueued"], stat["skipped_roles"], stat["skipped_too_many"],
-                host, project, _sse_reflow_q.qsize()))
     return stat
 
 
+def _sse_reflow_gate(msgs, host, project, cid=None):
+    """旧会话确认闸门（2026-10-28 凯文拍定）。
+
+    - 候选数 <= SSE_REFLOW_AUTO_MAX：新/短会话，自动回流，零摩擦。
+    - 候选数  > SSE_REFLOW_AUTO_MAX：长历史会话，**不自动回流**，落
+      received_sse/reflow_pending.jsonl 待确认（附预估判定次数），避免瞬间烧掉上百次判定。
+    返回 stat dict（含 status: 'enqueued' | 'pending_confirm' | 'disabled'）。
+    """
+    stat = {"enqueued": 0, "skipped_roles": 0, "skipped_too_many": 0, "status": "disabled"}
+    if not SSE_REFLOW_ENABLED or not host:
+        return stat
+
+    cands = _sse_reflow_candidates(msgs, stat)
+    n = len(cands)
+    stat["candidates"] = n
+    stat["est_calls"] = int(round(n * SSE_REFLOW_CALL_RATIO))
+
+    if n == 0:
+        stat["status"] = "enqueued"     # 无候选，等价于已处理
+        return stat
+
+    if n <= SSE_REFLOW_AUTO_MAX:
+        _sse_reflow_put(cands, host, project, stat)
+        stat["status"] = "enqueued"
+        _log("SSE_REFLOW enqueue=%d skipped_roles=%d skipped_too_many=%d host=%s project=%s q=%d"
+             % (stat["enqueued"], stat["skipped_roles"], stat["skipped_too_many"],
+                host, project, _sse_reflow_q.qsize()))
+        return stat
+
+    # 超过自动阈值 -> 挂起待确认
+    pid = uuid.uuid4().hex[:12]
+    rec = {
+        "pending_id": pid,
+        "requested_at": datetime.now().isoformat(timespec="milliseconds"),
+        "host": host,
+        "project": project,
+        "conversationId": cid,
+        "candidates": n,
+        "est_calls": stat["est_calls"],
+        "status": "pending",
+        # 存候选本身，确认时无需回到 sse jsonl 里按行号找（行号会随并发写入漂移）
+        "messages": [{"role": r, "text": t, "id": i, "createTime": c}
+                     for (r, t, i, c) in cands],
+    }
+    try:
+        os.makedirs(SSE_DIR, exist_ok=True)
+        with open(REFLOW_PENDING_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:
+        _log("SSE_REFLOW_PENDING_WRITE_ERROR :: %s: %s" % (type(e).__name__, e))
+
+    stat["status"] = "pending_confirm"
+    stat["pending_id"] = pid
+    _log("SSE_REFLOW_PENDING pending_id=%s host=%s project=%s cid=%s candidates=%d est_calls=%d "
+         "-> 超自动阈值 %d，需确认后放行（POST /sse_reflow_confirm）"
+         % (pid, host, project, cid, n, stat["est_calls"], SSE_REFLOW_AUTO_MAX))
+    return stat
+
+
+def _sse_reflow_list_pending(only_pending=True):
+    """列出待确认记录。"""
+    out = []
+    if not os.path.exists(REFLOW_PENDING_PATH):
+        return out
+    try:
+        with open(REFLOW_PENDING_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if only_pending and r.get("status") != "pending":
+                    continue
+                out.append({k: v for k, v in r.items() if k != "messages"})
+    except Exception as e:
+        _log("SSE_REFLOW_PENDING_READ_ERROR :: %s: %s" % (type(e).__name__, e))
+    return out
+
+
+def _sse_reflow_confirm(pending_id=None, confirm_all=False):
+    """放行挂起的回流。返回 (已放行的记录数, 入队条数, 明细list)。"""
+    if not os.path.exists(REFLOW_PENDING_PATH):
+        return 0, 0, []
+    try:
+        with open(REFLOW_PENDING_PATH, encoding="utf-8") as f:
+            lines = [l.strip() for l in f if l.strip()]
+    except Exception as e:
+        _log("SSE_REFLOW_PENDING_READ_ERROR :: %s: %s" % (type(e).__name__, e))
+        return 0, 0, []
+
+    recs = []
+    for l in lines:
+        try:
+            recs.append(json.loads(l))
+        except Exception:
+            continue
+
+    done, enq, detail = 0, 0, []
+    for i, r in enumerate(recs):
+        if r.get("status") != "pending":
+            continue
+        if not confirm_all and pending_id and r.get("pending_id") != pending_id:
+            continue
+        stat = {"enqueued": 0, "skipped_roles": 0, "skipped_too_many": 0}
+        cands = [(m.get("role"), m.get("text"), m.get("id"), m.get("createTime"))
+                 for m in (r.get("messages") or [])]
+        _sse_reflow_put(cands, r.get("host"), r.get("project"), stat)
+        r["status"] = "confirmed"
+        r["confirmed_at"] = datetime.now().isoformat(timespec="milliseconds")
+        r["enqueued"] = stat["enqueued"]
+        r["skipped_too_many"] = stat["skipped_too_many"]
+        recs[i] = r
+        done += 1
+        enq += stat["enqueued"]
+        detail.append({"pending_id": r.get("pending_id"), "cid": r.get("conversationId"),
+                       "enqueued": stat["enqueued"],
+                       "skipped_too_many": stat["skipped_too_many"]})
+        _log("SSE_REFLOW_CONFIRM pending_id=%s cid=%s enqueued=%d skipped_too_many=%d"
+             % (r.get("pending_id"), r.get("conversationId"),
+                stat["enqueued"], stat["skipped_too_many"]))
+
+    if done:
+        try:
+            with open(REFLOW_PENDING_PATH, "w", encoding="utf-8") as f:
+                for r in recs:
+                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        except Exception as e:
+            _log("SSE_REFLOW_PENDING_WRITE_ERROR :: %s: %s" % (type(e).__name__, e))
+    return done, enq, detail
+
+
 def _sse_reflow_worker():
-    """后台单线程消费回流队列：一条一次 process_turn（= 一次 LLM 判定）。"""
+    """后台单线程消费回流队列：一条一次 process_turn（= 一次 LLM 判定）。
+
+    连续失败熔断：SSE_REFLOW_FAIL_LIMIT 次连续失败（典型=HTTP 402 欠费 / 网络错）后
+    自动把 SSE_REFLOW_ENABLED 置 False 并清空队列——欠费复发时不能把剩下的全打一遍 402、
+    更不能灌爆 received.log。成功一次即清零计数。
+    """
+    global SSE_REFLOW_ENABLED, _sse_reflow_fails
     while True:
         item = _sse_reflow_q.get()
         try:
             process_turn(item)
+            _sse_reflow_fails = 0
         except SystemExit:
             raise
         except Exception as e:
-            _log("SSE_REFLOW_ERROR :: %s: %s" % (type(e).__name__, e))
+            _sse_reflow_fails += 1
+            _log("SSE_REFLOW_ERROR (%d/%d) :: %s: %s"
+                 % (_sse_reflow_fails, SSE_REFLOW_FAIL_LIMIT, type(e).__name__, e))
+            if SSE_REFLOW_FAIL_LIMIT and _sse_reflow_fails >= SSE_REFLOW_FAIL_LIMIT:
+                SSE_REFLOW_ENABLED = False
+                dropped = 0
+                try:
+                    while True:
+                        _sse_reflow_q.get_nowait()
+                        _sse_reflow_q.task_done()
+                        dropped += 1
+                except Exception:
+                    pass
+                _log("SSE_REFLOW_AUTO_DISABLED 连续 %d 次判定失败 -> 已自动关闭回流并丢弃队列 %d 条。"
+                     "排查后如需恢复：确认 DeepSeek 余额，然后重启 server（或 BRIDGE_SSE_REFLOW=1）。"
+                     % (_sse_reflow_fails, dropped))
+                _sse_reflow_fails = 0
         finally:
             _sse_reflow_q.task_done()
 
@@ -750,6 +913,9 @@ class Handler(BaseHTTPRequestHandler):
                 "version": "0.4.0",
                 "pid": os.getpid(),
                 "port": PORT,
+                "reflow_enabled": SSE_REFLOW_ENABLED,
+                "reflow_queue": _sse_reflow_q.qsize(),
+                "reflow_pending": len(_sse_reflow_list_pending()),
                 "turns": len(_received),
                 "diagnoses": _diag_count,
                 "recv_dir": RECV_DIR,
@@ -787,6 +953,17 @@ class Handler(BaseHTTPRequestHandler):
             self._effects(parse_qs(parsed.query))
         elif path == "/state":
             self._state(parse_qs(parsed.query))
+        elif path == "/sse_reflow_pending":
+            # 列出「超自动阈值、挂起待确认」的回流批次，供人工决定是否放行。
+            items = _sse_reflow_list_pending()
+            self._json(200, {
+                "ok": True,
+                "count": len(items),
+                "auto_max": SSE_REFLOW_AUTO_MAX,
+                "max_per_batch": SSE_REFLOW_MAX_PER_BATCH,
+                "enabled": SSE_REFLOW_ENABLED,
+                "items": items,
+            })
         elif path in ("/test-page.html", "/", "/index.html"):
             try:
                 with open(os.path.join(BASE_DIR, "test-page.html"), "rb") as f:
@@ -893,6 +1070,24 @@ class Handler(BaseHTTPRequestHandler):
             self._diagnose()
         elif path == "/sse":
             self._sse()
+        elif path == "/sse_reflow_confirm":
+            # 放行挂起的回流批次。body: {"pending_id": "xxx"} 或 {"all": true}
+            body = self._read_json()
+            if "__error__" in body:
+                self._json(400, {"ok": False, "error": body["__error__"]})
+                return
+            confirm_all = bool(body.get("all"))
+            pid = body.get("pending_id")
+            if not confirm_all and not pid:
+                self._json(400, {"ok": False,
+                                 "error": "need pending_id or all=true"})
+                return
+            if not SSE_REFLOW_ENABLED:
+                self._json(409, {"ok": False,
+                                 "error": "reflow disabled (BRIDGE_SSE_REFLOW=0 或已被熔断自动关闭)"})
+                return
+            done, enq, detail = _sse_reflow_confirm(pending_id=pid, confirm_all=confirm_all)
+            self._json(200, {"ok": True, "confirmed": done, "enqueued": enq, "detail": detail})
         else:
             self._json(404, {"ok": False, "error": "not found"})
 
@@ -931,7 +1126,7 @@ class Handler(BaseHTTPRequestHandler):
                             s.add(mid)
                 elif msgs:
                     new_msgs = list(msgs)     # 无 cid：无法补差，原样回流（靠 process_turn 去重兜底）
-                _sse_enqueue_reflow(new_msgs, host, project)
+                _sse_reflow_gate(new_msgs, host, project, cid=cid)
                 # 实时 SSE turn 命中 -> 记下时间戳，作为「实时腿正在工作」的证据
                 if host:
                     h = _sse_health.setdefault(host, {"last_turn_at": None, "turn_count": 0})
@@ -955,8 +1150,9 @@ class Handler(BaseHTTPRequestHandler):
                     inner['messages'] = new_msgs
                     inner['added_count'] = len(new_msgs)
                     inner['skipped_count'] = skipped
-                    # 回流：只喂补差后的新消息（已按 message.id 去重），避免重复判定
-                    inner['reflow'] = _sse_enqueue_reflow(new_msgs, host, project)
+                    # 回流：只喂补差后的新消息（已按 message.id 去重），避免重复判定。
+                    # 走闸门：长历史会话（> SSE_REFLOW_AUTO_MAX）挂起待确认，不自动烧判定。
+                    inner['reflow'] = _sse_reflow_gate(new_msgs, host, project, cid=cid)
                     # [新判据] 新增消息里若含"刚产生"的（createTime 距今 < 窗口），说明服务端
                     # 确实产出了新消息；此时若实时腿在同期窗口内没抓到任何 turn，才是真失效。
                     # 若补的只是旧历史（createTime 很老），说明用户只是首次进会话补数据，不算。
