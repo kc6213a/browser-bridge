@@ -523,7 +523,100 @@
     });
   };
 
+  // ---------------------------------------------------------------
+  // [#22 旁挂] 接收 MAIN world (sse_tap.js) 的解析结果并转发给 background。
+  // 注意：这段必须**无条件**执行，不能放进 boot / bootReal——
+  //       bbDisableHosts 停的是 DOM 采集，SSE 采集仍要继续。
+  // ---------------------------------------------------------------
+  (function installSseBridge() {
+    if (typeof window === 'undefined' || window.__BB_SSE_BRIDGE) return;
+    window.__BB_SSE_BRIDGE = 1;
+
+    window.addEventListener('message', function (e) {
+      if (e.source !== window) return;
+      var d = e.data;
+      if (!d) return;
+      if (d.__bbSse === 1) {
+        var pid = null;
+        try {
+          if (typeof window.__BRIDGE_PROJECT_ID__ === 'function') {
+            pid = window.__BRIDGE_PROJECT_ID__();
+          }
+        } catch (err) { /* 无 project 不影响上报 */ }
+        try {
+          chrome.runtime.sendMessage({
+            type: 'BRIDGE_SSE',
+            host: location.hostname,
+            project: pid,
+            kind: d.kind || 'unknown',
+            payload: d.data || null
+          }, function () { void chrome.runtime.lastError; });
+        } catch (err) { /* background 不在时静默 */ }
+        return;
+      }
+      // [#22 永久关·落地A] captureOff/captureOn 改为「当前页即时生效、刷新恢复默认关」的临时逃生口，
+      // 不再写 storage（写 storage 会让刷新不失效，违背「临时应急」语义）。
+      if (d.__bbCmd === 'captureOff' || d.__bbCmd === 'captureOn') {
+        try {
+          if (d.__bbCmd === 'captureOff') {
+            escapeHatchOn = false;
+            stopCapture();
+            console.log('[browser-bridge] capture OFF now (temporary — reload restores hardcoded default)');
+          } else {
+            escapeHatchOn = true;
+            startCaptureIfNeeded();
+            console.log('[browser-bridge] capture ON now (temporary escape hatch — reload restores hardcoded default)');
+          }
+        } catch (err) { console.log('[browser-bridge] capture toggle failed: ' + err); }
+        return;
+      }
+    }, false);
+  })();
+
+  // ---------------------------------------------------------------
+  // ---------------------------------------------------------------
+  // [#22 永久关·落地A] ChatGPT DOM 采集写死默认关（SSE/history 腿接管数据）。
+  // DOM 修法三件套（新选择器/L2排除/滚动累积）已取消，#22 改判"通过架构替换解决"。
+  // captureOff/captureOn 仅作「当前页临时」逃生口（SSE 挂了应急），刷新即恢复默认关，不写 storage。
+  //   关：window.postMessage({__bbCmd:'captureOff'},'*')   （即时生效，无需 F5）
+  //   开：window.postMessage({__bbCmd:'captureOn'},'*')    （即时生效，刷新恢复关）
+  // ---------------------------------------------------------------
+  const CAPTURE_DISABLE_HOSTS = ['chatgpt.com', 'chat.openai.com'];
+
+  let captureRunning = false;   // 当前页 DOM 采集是否在跑
+  let escapeHatchOn = false;    // captureOn 临时开（当前页，刷新恢复默认关）
+
+  function stopCapture() {
+    if (!captureRunning) return;
+    try { observer.disconnect(); } catch (e) {}
+    captureRunning = false;
+    try { document.documentElement.setAttribute('data-bridge-capture', 'disabled'); } catch (e) {}
+  }
+
+  function startCaptureIfNeeded() {
+    if (captureRunning) return;
+    bootReal();
+    captureRunning = true;
+    // 状态标记必须跟事实同步：此前只有 stopCapture()/boot() 会写 'disabled'，
+    // captureOn 不更新属性 -> 采集实际已开、属性却仍写 disabled，误导面板与后续诊断
+    // （2026-10-27 修：凯文按"看属性变"验收会误判逃生口失效）。
+    try { document.documentElement.setAttribute('data-bridge-capture', 'enabled'); } catch (e) {}
+  }
+
   function boot() {
+    const host = location.hostname;
+    // [#22 永久关·落地A] ChatGPT 类站点写死默认关 DOM 采集（SSE/history 腿不受影响，
+    // 因为它们走 installSseBridge 且无条件执行）。captureOn 可临时开当前页。
+    if (CAPTURE_DISABLE_HOSTS.indexOf(host) >= 0 && !escapeHatchOn) {
+      console.log('[browser-bridge] capture DISABLED on ' + host +
+        ' (hardcoded default — SSE/history legs serve this host)');
+      try { document.documentElement.setAttribute('data-bridge-capture', 'disabled'); } catch (e) {}
+      return;
+    }
+    startCaptureIfNeeded();
+  }
+
+  function bootReal() {
     try {
       observer.observe(document.documentElement || document.body, {
         childList: true,
@@ -542,6 +635,7 @@
 
     // #44/#46：boot 后自动做一次全量扫描（手动会忘）。非虚拟滚动站点 no-op。
     setTimeout(() => {
+      if (!captureRunning) return;  // 期间被 captureOff 停了就不跑
       fullScan({ restore: true }).then((res) => {
         if (res.ran) {
           console.log('[browser-bridge] fullScan done steps=' + res.steps +

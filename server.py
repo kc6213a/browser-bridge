@@ -34,6 +34,7 @@ browser-bridge 本地接收端 (v0.4 / Sprint 1)
 import hashlib
 import json
 import os
+import queue
 import sys
 import threading
 from datetime import datetime
@@ -83,6 +84,22 @@ _ws_flag_alerted = set()  # 已告警 resume_with_websockets 的 host（每 host
 # （没发言本就不该有 turn，却被计成腿失效；23:25 复测已实证）。
 SSE_FRESH_WINDOW_SEC = 300  # 秒：createTime / last_turn_at 距现在的"新鲜"窗口
 
+# ---- SSE -> CA 回流（2026-10-28）----
+# 背景：ChatGPT DOM 采集已永久关闭（CAPTURE_DISABLE_HOSTS），数据只走 SSE + history。
+# 但 _sse 原只落盘 received_sse/、不喂 Runtime，导致 ChatGPT 数据断流、进不了 CA 推理层。
+# 回流 = 把 SSE 抓到的消息补差后转成 /turn payload，交给 process_turn（同一条链路：
+# 去重走 _dedupe_key + _seen_keys[(host,project)]，判定走 rt.on_turn，落盘走 persist）。
+# 走 process_turn 而非直接写 turns.jsonl：后者只是原始落盘、不产事件（NEW_TOPIC 等）。
+SSE_REFLOW_ENABLED = os.environ.get("BRIDGE_SSE_REFLOW", "0") != "0"
+# 单次回流上限（2026-10-28 凯文拍定）：#52 DeepSeek 欠费(HTTP 402)未解决，而打开一个长会话
+# 的 history 全量补差可能上百条、每条一次 LLM 判定 -> 瞬间几百次失败请求，还会灌爆日志。
+# 超过上限时只回流「最近」的 N 条（服务端数组按时间升序，取末尾），其余标 skipped_too_many。
+# 默认值是安全阀，不是业务口径；要全量回流就把上限调大。
+SSE_REFLOW_MAX_PER_BATCH = 50
+# system：基本是空消息（text=''），喂进去只是白烧一次 LLM 判定 -> 滤。
+# tool：占约 16.7%，是工具调用结果；暂按"噪音"滤掉，确认有信息价值后从本集合移除即可放开。
+SSE_REFLOW_SKIP_ROLES = {"system", "tool"}
+_sse_reflow_q = queue.Queue()   # 异步：LLM 判定慢，不能在 _sse 持锁路径里同步跑
 
 _effects_cache = []      # GET /effects 的内存视图（启动时从 effects.jsonl 灌回）
 _effect_seq = 0          # 单调递增 effect id；跨重启续编号
@@ -608,6 +625,84 @@ def process_turn(payload):
     }
 
 
+def _sse_enqueue_reflow(msgs, host, project):
+    """把 SSE 抓到的新消息（已按 message.id 补差）转成 /turn payload 入回流队列。
+
+    只入队、不阻塞：真正的 process_turn（含 LLM 判定）由后台 worker 串行消费。
+    **顺序保证**：queue.Queue 是 FIFO，且只有一个 consumer 线程 —— 入队顺序即
+    msgs 数组顺序，process_turn 也就按同一顺序串行执行，turn_no 单调递增，
+    历史消息不会乱序入库（服务端数组本身按时间升序，S4 已验）。
+    返回统计 dict：{enqueued, skipped_roles, skipped_too_many}。
+    """
+    stat = {"enqueued": 0, "skipped_roles": 0, "skipped_too_many": 0}
+    if not SSE_REFLOW_ENABLED or not host:
+        return stat
+
+    cands = []
+    for m in msgs:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        if role in SSE_REFLOW_SKIP_ROLES:
+            stat["skipped_roles"] += 1
+            continue
+        text = (m.get("text") or "").strip()
+        if not text:
+            stat["skipped_roles"] += 1
+            continue
+        ct = m.get("createTime")
+        cands.append((role or "?", text, m.get("id"),
+                      ct if isinstance(ct, (int, float)) else None))
+
+    # 显式按 createTime 升序（旧->新）稳定排序：不依赖「服务端数组方向」这个隐含假设。
+    # 实证：23:21 那批 108 条整体是升序，但非严格（前 5 条出现 10:00:55 -> 10:00:53 的秒级倒退），
+    # 稳定排序可修正抖动，同时保证将来服务端改方向也不会让抽取层读到倒序时间线。
+    # 只有全部消息都带 createTime 时才排；否则保持原数组顺序，不引入额外假设。
+    if cands and all(c[3] is not None for c in cands):
+        before_ids = [c[2] for c in cands]
+        cands.sort(key=lambda c: c[3])          # stable：同秒保持原相对顺序
+        stat["sorted_by_create_time"] = True
+        if [c[2] for c in cands] != before_ids:
+            stat["reordered"] = True            # 排序确实改变了顺序，留痕便于验收
+    else:
+        stat["sorted_by_create_time"] = False
+
+    # 上限保护：只回流最近的 N 条，更早的弃掉（不烧 LLM）
+    if len(cands) > SSE_REFLOW_MAX_PER_BATCH:
+        stat["skipped_too_many"] = len(cands) - SSE_REFLOW_MAX_PER_BATCH
+        cands = cands[-SSE_REFLOW_MAX_PER_BATCH:]
+
+    for role, text, mid, _ct in cands:
+        _sse_reflow_q.put({
+            "text": text,
+            "role": role,
+            "source": host,
+            "message_id": mid,
+            "message_id_source": "sse",
+            "project_id": project,      # None -> process_turn 落 _no_project 兜底桶
+            "layer": "sse",
+        })
+        stat["enqueued"] += 1
+
+    if stat["enqueued"] or stat["skipped_too_many"]:
+        _log("SSE_REFLOW enqueue=%d skipped_roles=%d skipped_too_many=%d host=%s project=%s pending=%d"
+             % (stat["enqueued"], stat["skipped_roles"], stat["skipped_too_many"],
+                host, project, _sse_reflow_q.qsize()))
+    return stat
+
+
+def _sse_reflow_worker():
+    """后台单线程消费回流队列：一条一次 process_turn（= 一次 LLM 判定）。"""
+    while True:
+        item = _sse_reflow_q.get()
+        try:
+            process_turn(item)
+        except SystemExit:
+            raise
+        except Exception as e:
+            _log("SSE_REFLOW_ERROR :: %s: %s" % (type(e).__name__, e))
+        finally:
+            _sse_reflow_q.task_done()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -836,6 +931,7 @@ class Handler(BaseHTTPRequestHandler):
                             s.add(mid)
                 elif msgs:
                     new_msgs = list(msgs)     # 无 cid：无法补差，原样回流（靠 process_turn 去重兜底）
+                _sse_enqueue_reflow(new_msgs, host, project)
                 # 实时 SSE turn 命中 -> 记下时间戳，作为「实时腿正在工作」的证据
                 if host:
                     h = _sse_health.setdefault(host, {"last_turn_at": None, "turn_count": 0})
@@ -860,6 +956,7 @@ class Handler(BaseHTTPRequestHandler):
                     inner['added_count'] = len(new_msgs)
                     inner['skipped_count'] = skipped
                     # 回流：只喂补差后的新消息（已按 message.id 去重），避免重复判定
+                    inner['reflow'] = _sse_enqueue_reflow(new_msgs, host, project)
                     # [新判据] 新增消息里若含"刚产生"的（createTime 距今 < 窗口），说明服务端
                     # 确实产出了新消息；此时若实时腿在同期窗口内没抓到任何 turn，才是真失效。
                     # 若补的只是旧历史（createTime 很老），说明用户只是首次进会话补数据，不算。
@@ -1006,6 +1103,13 @@ def main():
     _prime_from_disk()
     _prime_effects()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    if SSE_REFLOW_ENABLED:
+        threading.Thread(target=_sse_reflow_worker, daemon=True,
+                         name="sse-reflow").start()
+        _stdout("sse->CA reflow worker started (enabled, skip_roles=%s)"
+                % sorted(SSE_REFLOW_SKIP_ROLES))
+    else:
+        _stdout("sse->CA reflow worker DISABLED (BRIDGE_SSE_REFLOW=0)")
     _stdout("receiver v0.4 listening on http://%s:%d  (pid=%d) recv_dir=%s runtime=%s llm=%s"
             % (HOST, PORT, os.getpid(), RECV_DIR, RUNTIME["status"], LLM_MODE))
     try:

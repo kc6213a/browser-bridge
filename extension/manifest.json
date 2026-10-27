@@ -20,6 +20,15 @@
     {
       "matches": [
         "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": ["sse_parse.js", "sse_tap.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://claude.ai/*",
         "https://chat.deepseek.com/*",

@@ -8,6 +8,8 @@ node_modules/
 # 运行时数据
 received/
 received_*/
+# 毒数据清退备份（含真实对话标题，绝不入库/不推 GitHub）
+_backup*/
 received.log
 received_v0.1.log.bak
 # 日志与临时

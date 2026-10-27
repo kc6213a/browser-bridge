@@ -8,6 +8,7 @@ const BASE = 'http://127.0.0.1:8787';
 const ROUTES = {
   BRIDGE_TURN: '/turn',
   BRIDGE_DIAGNOSE: '/diagnose',
+  BRIDGE_SSE: '/sse',
 };
 
 function forward(route, body) {
@@ -21,6 +22,18 @@ function forward(route, body) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // #22 旁挂：SSE 结果单独走 /sse，不构造 turn body、不参与 /turn 去重
+  if (msg && msg.type === 'BRIDGE_SSE') {
+    forward('/sse', {
+      host: msg.host || null,
+      project: msg.project || null,
+      kind: msg.kind || 'unknown',
+      payload: msg.payload || null,
+      tab_url: (sender.tab && sender.tab.url) || null,
+    }).then((server) => sendResponse({ ok: !!(server && server.ok), server }));
+    return true;
+  }
+
   const route = msg && ROUTES[msg.type];
   if (!route) return false;
 
