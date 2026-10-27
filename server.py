@@ -91,17 +91,19 @@ SSE_FRESH_WINDOW_SEC = 300  # 秒：createTime / last_turn_at 距现在的"新�
 # 回流 = 把 SSE 抓到的消息补差后转成 /turn payload，交给 process_turn（同一条链路：
 # 去重走 _dedupe_key + _seen_keys[(host,project)]，判定走 rt.on_turn，落盘走 persist）。
 # 走 process_turn 而非直接写 turns.jsonl：后者只是原始落盘、不产事件（NEW_TOPIC 等）。
-# 默认开（2026-10-28 复核 #52 后改）：DeepSeek 余额已恢复（实测 /user/balance HTTP 200,
-# is_available=true, total_balance=12.81 CNY），且实测 62 条消息 101 次判定全部 runtime=ok。
-# 仍可用 env BRIDGE_SSE_REFLOW=0 手动关。
-# 运行期的兜底是「连续失败熔断」（见 SSE_REFLOW_FAIL_LIMIT）——欠费复发时自动停，不灌 402。
-SSE_REFLOW_ENABLED = os.environ.get("BRIDGE_SSE_REFLOW", "1") != "0"
-# 旧会话确认闸门（2026-10-28 凯文拍定）：单次补差消息数 <= 本值 -> 自动回流（新/短会话，零摩擦）；
-# 超过 -> **不自动回流**，落 received_sse/reflow_pending.jsonl 待确认，避免打开一个长历史会话
-# 就瞬间烧掉上百次 LLM 判定。确认后仍受 MAX_PER_BATCH 硬上限约束。
-SSE_REFLOW_AUTO_MAX = int(os.environ.get("BRIDGE_SSE_REFLOW_AUTO_MAX", "20"))
-# 连续 LLM 失败熔断：worker 连续 N 次判定失败（典型=HTTP 402 欠费/网络错）就自动关闭回流并告警，
-# 防止欠费复发时把队列里剩下的全打一遍 402、灌爆日志。置 0 可禁用熔断。
+# 默认关（2026-10-28 凯文拍定改回）：省成本是默认态，防断流**不靠默认开**、靠 /health 显式告警
+# （见 _reflow_health()：关闭时返回 reflow_warning，启动日志打醒目警告）——两个风险都要堵，
+# 不是二选一。启用：env BRIDGE_SSE_REFLOW=1。
+SSE_REFLOW_ENABLED = os.environ.get("BRIDGE_SSE_REFLOW", "0") != "0"
+# 熔断原因（供 /health 显式标记）；None 表示未熔断。
+_sse_reflow_disabled_reason = None
+# 旧会话确认闸门（2026-10-28 凯文拍定，阈值由 20 下调为 **5**）：
+# 单次补差候选数 <= 本值 -> 自动回流；超过 -> **挂起**落 received_sse/reflow_pending.jsonl
+# 待确认（附 est_calls 预估）。阈值定 5 的理由：19 条会话就会自动烧约 30 次判定而用户毫不知情，
+# 宁可小会话也让用户知道要烧几次，而不是替他决定。
+SSE_REFLOW_AUTO_MAX = int(os.environ.get("BRIDGE_SSE_REFLOW_AUTO_MAX", "5"))
+# 连续失败熔断：worker 连续 N 次判定失败（网络错/超时等**可恢复**故障）才熔断。
+# ⚠️ HTTP 402（欠费）**不走这里**——欠费不是网络抖动，第一次就立即熔断（见 _is_billing_error）。
 SSE_REFLOW_FAIL_LIMIT = int(os.environ.get("BRIDGE_SSE_REFLOW_FAIL_LIMIT", "3"))
 # 预估判定次数用的经验系数：2026-10-28 实测 62 条消息 -> 101 次 LLM 调用（1.63 次/条）。
 # 一条消息可能同时产出 NEW_TOPIC / ASSUMPTION_INTRODUCED 等多个候选，各调一次。
@@ -831,12 +833,36 @@ def _sse_reflow_confirm(pending_id=None, confirm_all=False):
     return done, enq, detail
 
 
+def _is_billing_error(exc):
+    """判定是否为「欠费类」错误（HTTP 402 / insufficient balance）。
+
+    欠费不是网络抖动——重试多少次都不会成功，所以**第一次就熔断**（零容忍），
+    而不是等连续 N 次。网络错/超时等可恢复故障才走 SSE_REFLOW_FAIL_LIMIT 计数。
+    """
+    s = "%s: %s" % (type(exc).__name__, exc)
+    low = s.lower()
+    return ("402" in s) or ("payment required" in low) or ("insufficient balance" in low) \
+        or ("balance" in low and "insufficient" in low)
+
+
+def _sse_reflow_trip(reason, dropped=0):
+    """熔断：关闭回流 + 清空队列 + 记录原因（供 /health 显式标记）。"""
+    global SSE_REFLOW_ENABLED, _sse_reflow_disabled_reason, _sse_reflow_fails
+    SSE_REFLOW_ENABLED = False
+    _sse_reflow_disabled_reason = reason
+    _sse_reflow_fails = 0
+    _log("SSE_REFLOW_AUTO_DISABLED reason=%s -> 已自动关闭回流并丢弃队列 %d 条。"
+         "排查后如需恢复：确认 DeepSeek 余额，然后重启 server（BRIDGE_SSE_REFLOW=1）。"
+         % (reason, dropped))
+
+
 def _sse_reflow_worker():
     """后台单线程消费回流队列：一条一次 process_turn（= 一次 LLM 判定）。
 
-    连续失败熔断：SSE_REFLOW_FAIL_LIMIT 次连续失败（典型=HTTP 402 欠费 / 网络错）后
-    自动把 SSE_REFLOW_ENABLED 置 False 并清空队列——欠费复发时不能把剩下的全打一遍 402、
-    更不能灌爆 received.log。成功一次即清零计数。
+    两套熔断策略（2026-10-28 凯文拍定）：
+      - **HTTP 402 欠费：零容忍，第一次就熔断**。欠费不是网络抖动，重试无意义，
+        继续打只会灌爆日志和触发限流。
+      - 网络错/超时等可恢复故障：连续 SSE_REFLOW_FAIL_LIMIT(3) 次才熔断；成功一次清零。
     """
     global SSE_REFLOW_ENABLED, _sse_reflow_fails
     while True:
@@ -847,11 +873,8 @@ def _sse_reflow_worker():
         except SystemExit:
             raise
         except Exception as e:
-            _sse_reflow_fails += 1
-            _log("SSE_REFLOW_ERROR (%d/%d) :: %s: %s"
-                 % (_sse_reflow_fails, SSE_REFLOW_FAIL_LIMIT, type(e).__name__, e))
-            if SSE_REFLOW_FAIL_LIMIT and _sse_reflow_fails >= SSE_REFLOW_FAIL_LIMIT:
-                SSE_REFLOW_ENABLED = False
+            if _is_billing_error(e):
+                _log("SSE_REFLOW_BILLING_ERROR :: %s: %s" % (type(e).__name__, e))
                 dropped = 0
                 try:
                     while True:
@@ -860,10 +883,23 @@ def _sse_reflow_worker():
                         dropped += 1
                 except Exception:
                     pass
-                _log("SSE_REFLOW_AUTO_DISABLED 连续 %d 次判定失败 -> 已自动关闭回流并丢弃队列 %d 条。"
-                     "排查后如需恢复：确认 DeepSeek 余额，然后重启 server（或 BRIDGE_SSE_REFLOW=1）。"
-                     % (_sse_reflow_fails, dropped))
-                _sse_reflow_fails = 0
+                _sse_reflow_trip("billing_402", dropped=dropped)
+                continue
+            _sse_reflow_fails += 1
+            _log("SSE_REFLOW_ERROR (%d/%d) :: %s: %s"
+                 % (_sse_reflow_fails, SSE_REFLOW_FAIL_LIMIT, type(e).__name__, e))
+            if SSE_REFLOW_FAIL_LIMIT and _sse_reflow_fails >= SSE_REFLOW_FAIL_LIMIT:
+                dropped = 0
+                try:
+                    while True:
+                        _sse_reflow_q.get_nowait()
+                        _sse_reflow_q.task_done()
+                        dropped += 1
+                except Exception:
+                    pass
+                _sse_reflow_trip("consecutive_failures_%d" % SSE_REFLOW_FAIL_LIMIT,
+                                 dropped=dropped)
+                continue
         finally:
             _sse_reflow_q.task_done()
 
@@ -916,6 +952,15 @@ class Handler(BaseHTTPRequestHandler):
                 "reflow_enabled": SSE_REFLOW_ENABLED,
                 "reflow_queue": _sse_reflow_q.qsize(),
                 "reflow_pending": len(_sse_reflow_list_pending()),
+                # 关闭时**显式告警**（凯文拍定）：防断流不靠"默认开"，靠这里让人一眼看见。
+                # reflow_disabled=true + reflow_warning 非空 = 数据不进 CA，需要人工介入。
+                "reflow_disabled": not SSE_REFLOW_ENABLED,
+                "reflow_disabled_reason": _sse_reflow_disabled_reason,
+                "reflow_warning": (None if SSE_REFLOW_ENABLED else (
+                    "SSE→CA 回流已关闭：ChatGPT 数据只落 received_sse/，不会进入 CA 推理层。"
+                    "启用请重启并设 BRIDGE_SSE_REFLOW=1"
+                    + ("（本次为自动熔断：%s）" % _sse_reflow_disabled_reason
+                       if _sse_reflow_disabled_reason else "（默认关闭）"))),
                 "turns": len(_received),
                 "diagnoses": _diag_count,
                 "recv_dir": RECV_DIR,
@@ -1302,10 +1347,19 @@ def main():
     if SSE_REFLOW_ENABLED:
         threading.Thread(target=_sse_reflow_worker, daemon=True,
                          name="sse-reflow").start()
-        _stdout("sse->CA reflow worker started (enabled, skip_roles=%s)"
-                % sorted(SSE_REFLOW_SKIP_ROLES))
+        _stdout("sse->CA reflow worker started (enabled, skip_roles=%s, auto_max=%d, "
+                "max_per_batch=%d, fail_limit=%d, 402=immediate-trip)"
+                % (sorted(SSE_REFLOW_SKIP_ROLES), SSE_REFLOW_AUTO_MAX,
+                   SSE_REFLOW_MAX_PER_BATCH, SSE_REFLOW_FAIL_LIMIT))
     else:
-        _stdout("sse->CA reflow worker DISABLED (BRIDGE_SSE_REFLOW=0)")
+        # 醒目警告（凯文拍定）：关闭是默认态，但必须让人一眼看见「数据在断流」，
+        # 不能静默。三行星号块 + 明确后果 + 恢复方法。
+        _stdout("*" * 72)
+        _stdout("*** WARNING: SSE->CA REFLOW DISABLED (BRIDGE_SSE_REFLOW=%s)" % "0 (default)")
+        _stdout("***   ChatGPT 数据只落 received_sse/，**不会进入 CA 推理层**（无 NEW_TOPIC/")
+        _stdout("***   ASSUMPTION 事件、议题树不更新）。这不是故障，是默认省钱配置。")
+        _stdout("***   如需回流：重启 server 时设 BRIDGE_SSE_REFLOW=1")
+        _stdout("*" * 72)
     _stdout("receiver v0.4 listening on http://%s:%d  (pid=%d) recv_dir=%s runtime=%s llm=%s"
             % (HOST, PORT, os.getpid(), RECV_DIR, RUNTIME["status"], LLM_MODE))
     try:
