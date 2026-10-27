@@ -49,6 +49,9 @@ AGENT_HOME = os.environ.get("CONVERSATION_AGENT_HOME") or DEFAULT_AGENT_HOME
 PORT = int(os.environ.get("BRIDGE_PORT", "8787"))
 RECV_DIR = os.environ.get("BRIDGE_RECV_DIR") or os.path.join(BASE_DIR, "received")
 LOG_PATH = os.environ.get("BRIDGE_LOG") or os.path.join(BASE_DIR, "received.log")
+# 旁挂 SSE 落盘目录：与 received/ 物理隔离，不进 turns.jsonl、不喂 Runtime、不去重。
+# 用于 #22 SSE 方案在 S1-S7 场景验证期间的数据收集，验证通过后可整体删除该目录。
+SSE_DIR = os.environ.get("BRIDGE_SSE_DIR") or os.path.join(BASE_DIR, "received_sse")
 EVENT_LOG = os.environ.get("BRIDGE_EVENT_LOG") or os.path.join(AGENT_HOME, "runtime", "event_log.jsonl")
 STATE_FILE = os.environ.get("BRIDGE_STATE_FILE") or os.path.join(AGENT_HOME, "runtime", "state.json")
 LLM_MODE = (os.environ.get("BRIDGE_LLM", "real") or "real").strip().lower()
@@ -63,11 +66,23 @@ BRIDGE_STATE_PATH = os.path.join(RUNTIME_DIR, "state.json")
 BRIDGE_EFFECTS_PATH = os.path.join(RUNTIME_DIR, "effects.jsonl")
 
 _lock = threading.Lock()
+_sse_lock = threading.Lock()
 _received = []
 _recent_texts = []
 _seen_keys = dict()   # key: (host:str, project:str) -> value: set[str]  (#50 二级分区去重)
 _turn_seq = 0
 _diag_count = 0
+
+# [#22 旁挂] SSE 腿内存态（server 重启即丢，运行期内足够；不持久化，避免复杂度）
+_seen_sse_msgids = {}   # conversationId -> set of message ids（history 按 id 补差）
+_sse_health = {}        # host -> {"last_turn_at": float|None, "turn_count": int}
+_ws_flag_alerted = set()  # 已告警 resume_with_websockets 的 host（每 host 仅一次）
+# [新判据 2026-10-27 凯文拍定] 只在「history 补到"刚产生"的新消息（服务端确有消息产出），
+# 但实时 SSE 腿在同期窗口内没抓到任何 turn」时才告警 —— 消息在产生、实时腿没抓到 = 真失效。
+# 取代旧判据「连续 N 次打开会话无 SSE turn」：旧判据在"只看历史、未发言"场景必误报
+# （没发言本就不该有 turn，却被计成腿失效；23:25 复测已实证）。
+SSE_FRESH_WINDOW_SEC = 300  # 秒：createTime / last_turn_at 距现在的"新鲜"窗口
+
 
 _effects_cache = []      # GET /effects 的内存视图（启动时从 effects.jsonl 灌回）
 _effect_seq = 0          # 单调递增 effect id；跨重启续编号
@@ -593,6 +608,8 @@ def process_turn(payload):
     }
 
 
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "BrowserBridge/0.4"
@@ -779,8 +796,164 @@ class Handler(BaseHTTPRequestHandler):
             self._turn()
         elif path == "/diagnose":
             self._diagnose()
+        elif path == "/sse":
+            self._sse()
         else:
             self._json(404, {"ok": False, "error": "not found"})
+
+    def _sse(self):
+        """旁挂入口：只落盘，不调 Runtime、不写 received/、不影响 /turn。
+
+        按 kind 分支（#22 前提2a / 前提3）：
+          - turn / history：维护 _seen_sse_msgids（history 按 message.id 补差，只落 SSE 没记录过的）
+          - session_open：累加 _sse_health，连续 N 次无 turn 则告警（SSE 腿失效粗监控）
+          - ws_flag：落 ws_flag_detected（每 host 一次）
+        payload 外层结构：{host, project, kind, payload: <d.data>}
+        """
+        payload = self._read_json()
+        if "__error__" in payload:
+            self._json(400, {"ok": False, "error": payload["__error__"]})
+            return
+
+        kind = payload.get("kind")
+        inner = payload.get("payload") or {}
+        host = payload.get("host")
+        project = payload.get("project")
+
+        with _sse_lock:
+            if kind == 'turn':
+                cid = inner.get('conversationId')
+                msgs = inner.get('messages') or []
+                new_msgs = []
+                if cid and msgs:
+                    s = _seen_sse_msgids.setdefault(cid, set())
+                    for m in msgs:
+                        mid = m.get('id') if isinstance(m, dict) else None
+                        if mid and mid in s:
+                            continue          # 流式增量重复上报同一条，跳过
+                        new_msgs.append(m)
+                        if mid:
+                            s.add(mid)
+                elif msgs:
+                    new_msgs = list(msgs)     # 无 cid：无法补差，原样回流（靠 process_turn 去重兜底）
+                # 实时 SSE turn 命中 -> 记下时间戳，作为「实时腿正在工作」的证据
+                if host:
+                    h = _sse_health.setdefault(host, {"last_turn_at": None, "turn_count": 0})
+                    h["last_turn_at"] = datetime.now().timestamp()
+                    h["turn_count"] += 1
+            elif kind == 'history':
+                cid = inner.get('conversationId')
+                msgs = inner.get('messages') or []
+                if cid and msgs:
+                    seen = _seen_sse_msgids.setdefault(cid, set())
+                    new_msgs = []
+                    skipped = 0
+                    for m in msgs:
+                        mid = m.get('id') if isinstance(m, dict) else None
+                        if mid and mid in seen:
+                            skipped += 1
+                            continue
+                        new_msgs.append(m)
+                        if mid:
+                            seen.add(mid)
+                    inner['messages'] = new_msgs
+                    inner['added_count'] = len(new_msgs)
+                    inner['skipped_count'] = skipped
+                    # 回流：只喂补差后的新消息（已按 message.id 去重），避免重复判定
+                    # [新判据] 新增消息里若含"刚产生"的（createTime 距今 < 窗口），说明服务端
+                    # 确实产出了新消息；此时若实时腿在同期窗口内没抓到任何 turn，才是真失效。
+                    # 若补的只是旧历史（createTime 很老），说明用户只是首次进会话补数据，不算。
+                    if new_msgs and host:
+                        nowts = datetime.now().timestamp()
+                        max_ct = None
+                        for m in new_msgs:
+                            ct = m.get('createTime') if isinstance(m, dict) else None
+                            if isinstance(ct, (int, float)):
+                                max_ct = ct if max_ct is None else max(max_ct, ct)
+                        fresh = max_ct is not None and (nowts - max_ct) < SSE_FRESH_WINDOW_SEC
+                        h = _sse_health.get(host) or {}
+                        last_turn = h.get('last_turn_at')
+                        sse_recent = last_turn is not None and (nowts - last_turn) < SSE_FRESH_WINDOW_SEC
+                        if fresh and not sse_recent:
+                            self._sse_alert(host, len(new_msgs), max_ct, last_turn)
+            elif kind == 'session_open':
+                # 仅登记 host 内存态，不再驱动告警。
+                # 旧判据「连续 N 次打开会话无 turn」已废弃：只看历史未发言也会攒满计数误报
+                # （2026-10-27 23:25 复测实证：3 次开会话均未发言 -> 误报一次）。
+                if host:
+                    _sse_health.setdefault(host, {"last_turn_at": None, "turn_count": 0})
+            elif kind == 'ws_flag':
+                if host and host not in _ws_flag_alerted:
+                    _ws_flag_alerted.add(host)
+                    kind = 'ws_flag_detected'  # 改写 kind 落地
+                else:
+                    # 已告警过：不重复落盘，避免刷
+                    self._json(200, {"ok": True, "note": "ws_flag already alerted"})
+                    return
+            # 其他 kind（install/skip/error/history_raw 等）原样落盘
+
+        # history 改写过 inner，需写回 payload 再落盘
+        if kind == 'history':
+            payload['payload'] = inner
+
+        os.makedirs(SSE_DIR, exist_ok=True)
+        day = datetime.now().strftime("%Y%m%d")
+        fname = os.path.join(SSE_DIR, "sse_%s.jsonl" % day)
+        rec = {
+            "received_at": datetime.now().isoformat(timespec="milliseconds"),
+            "host": host,
+            "project": project,
+            "kind": kind,
+            "payload": payload,
+        }
+        line = json.dumps(rec, ensure_ascii=False)
+        with _sse_lock:
+            with open(fname, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        _log("SSE kind=%s host=%s project=%s bytes=%d -> %s"
+             % (kind, host, project, len(line), os.path.basename(fname)))
+        self._json(200, {"ok": True, "file": os.path.basename(fname)})
+
+    def _sse_alert(self, host, added_count, max_ct=None, last_turn_at=None):
+        """落 sse_zero_alert 告警（2026-10-27 新判据）。
+        语义：history 补到了"刚产生"的新消息（服务端确有消息产出），但实时 SSE 腿在同期
+        窗口内没抓到任何 turn —— 消息在产生、实时腿却没抓到 = 真实失效。
+        补纯旧历史（createTime 老）不触发：那只是首次进会话补数据，不是腿坏了。
+        注意：调用方 _sse 已持 _sse_lock，这里不再获取，直接落盘 + 日志。
+        """
+        os.makedirs(SSE_DIR, exist_ok=True)
+        day = datetime.now().strftime("%Y%m%d")
+        fname = os.path.join(SSE_DIR, "sse_%s.jsonl" % day)
+        nowts = datetime.now().timestamp()
+        newest_age = round(nowts - max_ct, 1) if max_ct else None
+        turn_age = round(nowts - last_turn_at, 1) if last_turn_at else None
+        rec = {
+            "received_at": datetime.now().isoformat(timespec="milliseconds"),
+            "host": host,
+            "project": None,
+            "kind": "sse_zero_alert",
+            "payload": {
+                "host": host,
+                "reason": "fresh_messages_but_no_turn",
+                "added_count": added_count,
+                "window_sec": SSE_FRESH_WINDOW_SEC,
+                "newest_msg_age_sec": newest_age,
+                "last_turn_age_sec": turn_age,
+                "message": ("history 补到 %d 条新消息，最新一条产生于 %s 秒前（新鲜窗口 %d 秒内），"
+                            "但实时 SSE 腿在同期没抓到任何 turn（上次 turn 距今 %s）——"
+                            "消息在产生而实时腿没抓到，判定实时腿真实失效"
+                            "（检查是否切换 WebSocket 或扩展故障）"
+                            % (added_count,
+                               newest_age if newest_age is not None else "未知",
+                               SSE_FRESH_WINDOW_SEC,
+                               (str(turn_age) + " 秒") if turn_age is not None else "从未有过 turn"))
+            }
+        }
+        line = json.dumps(rec, ensure_ascii=False)
+        with open(fname, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        _log("SSE_ZERO_ALERT host=%s reason=fresh_but_no_turn added=%d window=%ds"
+             % (host, added_count, SSE_FRESH_WINDOW_SEC))
 
     def _turn(self):
         payload = self._read_json()
